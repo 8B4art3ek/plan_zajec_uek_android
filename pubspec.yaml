@@ -1,0 +1,48 @@
+name: plan_zajec_uek
+description: Plan zajęć UEK - aplikacja do wyświetlania planu zajęć.
+publish_to: 'none'
+version: 1.0.0+1
+
+environment:
+  sdk: '>=3.3.0 <4.0.0'
+
+dependencies:
+  flutter:
+    sdk: flutter
+
+  # State management
+  flutter_riverpod: ^2.5.1
+
+  # Network
+  http: ^1.2.1
+
+  # HTML parsing
+  html: ^0.15.4
+
+  # Secure storage
+  flutter_secure_storage: ^9.0.0
+
+  # Local database
+  sqflite: ^2.3.3
+  path: ^1.9.0
+
+  # Notifications
+  flutter_local_notifications: ^17.2.2
+
+  # Background tasks
+  workmanager: ^0.9.0+3
+
+  # Crypto for change detection hashing
+  crypto: ^3.0.3
+
+  # Date formatting
+  intl: ^0.19.0
+  webview_flutter: ^4.14.1
+
+dev_dependencies:
+  flutter_test:
+    sdk: flutter
+  flutter_lints: ^3.0.0
+
+flutter:
+  uses-material-design: true
