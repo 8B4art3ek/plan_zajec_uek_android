@@ -34,6 +34,26 @@ migrate_working_dir/
 /build/
 /coverage/
 
+# Credentials, signing keys and private local data
+.env
+.env.*
+!.env.example
+*.jks
+*.keystore
+*.p12
+*.pfx
+*.pem
+*.key
+key.properties
+*.db
+*.db-shm
+*.db-wal
+*.sqlite
+*.sqlite3
+*.apk
+*.aab
+.codex-remote-attachments/
+
 # Symbolication related
 app.*.symbols
 

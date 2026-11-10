@@ -4,32 +4,59 @@ import 'package:sqflite/sqflite.dart';
 import 'package:path/path.dart' as path;
 import '../../domain/entities/group.dart';
 import '../../domain/entities/schedule_entry.dart';
+import '../../domain/entities/schedule_change.dart';
 import '../../domain/entities/subject_filter.dart';
 import '../../domain/entities/user_event.dart';
 
 class LocalDatabase {
-  static Database? _database;
+  LocalDatabase({DatabaseFactory? factory}) : _factory = factory;
+
+  final DatabaseFactory? _factory;
+  Future<Database>? _database;
+  Future<void>? _closing;
   static const _dbName = 'plan_zajec.db';
-  static const _dbVersion = 3;
+  static const _dbVersion = 4;
 
   Future<Database> get database async {
-    _database ??= await _initDatabase();
-    return _database!;
+    while (true) {
+      while (_closing != null) {
+        await _closing;
+      }
+      final pending = _database ??= _openDatabase();
+      final db = await pending;
+      if (identical(_database, pending) && db.isOpen) return db;
+      if (identical(_database, pending)) _database = null;
+    }
+  }
+
+  Future<Database> _openDatabase() async {
+    try {
+      return await _initDatabase();
+    } catch (_) {
+      _database = null;
+      rethrow;
+    }
   }
 
   Future<Database> _initDatabase() async {
-    final dbPath = await getDatabasesPath();
+    final factory = _factory ?? databaseFactory;
+    final dbPath = await factory.getDatabasesPath();
     final dbFile = path.join(dbPath, _dbName);
 
-    return openDatabase(
+    return factory.openDatabase(
       dbFile,
-      version: _dbVersion,
-      onCreate: _onCreate,
-      onUpgrade: _onUpgrade,
+      options: OpenDatabaseOptions(
+        version: _dbVersion,
+        // The background engine must not close the foreground engine's handle.
+        singleInstance: false,
+        onCreate: _onCreate,
+        onUpgrade: _onUpgrade,
+      ),
     );
   }
 
   Future<void> _onCreate(Database db, int version) async {
+    await _createScheduleChanges(db);
     await db.execute('''
       CREATE TABLE groups (
         id INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -96,6 +123,7 @@ class LocalDatabase {
   }
 
   Future<void> _onUpgrade(Database db, int oldVersion, int newVersion) async {
+    if (oldVersion < 4) await _createScheduleChanges(db);
     if (oldVersion < 2) {
       await db.execute('''
         CREATE TABLE IF NOT EXISTS app_settings (
@@ -141,10 +169,18 @@ class LocalDatabase {
 
   Future<void> deleteGroup(String groupId) async {
     final db = await database;
-    await db.delete('groups', where: 'group_id = ?', whereArgs: [groupId]);
-    // Also delete entries for this group
-    await db.delete('schedule_entries',
-        where: 'group_id = ?', whereArgs: [groupId]);
+    await db.transaction((txn) async {
+      for (final table in [
+        'groups',
+        'schedule_entries',
+        'subject_filters',
+        'schedule_changes'
+      ]) {
+        await txn.delete(table, where: 'group_id = ?', whereArgs: [groupId]);
+      }
+      await txn.delete('app_settings',
+          where: 'key = ?', whereArgs: ['schedule_period_$groupId']);
+    });
   }
 
   Map<String, dynamic> _groupToMap(Group g) => {
@@ -164,8 +200,8 @@ class LocalDatabase {
 
   // ========== SCHEDULE ENTRIES ==========
 
-  Future<void> saveScheduleEntries(
-      List<ScheduleEntry> entries, String groupId) async {
+  Future<void> saveScheduleEntries(List<ScheduleEntry> entries, String groupId,
+      {List<ScheduleChange> changes = const [], int? period}) async {
     final db = await database;
     final batch = db.batch();
 
@@ -181,10 +217,61 @@ class LocalDatabase {
       );
     }
 
+    for (final change in changes) {
+      batch.insert('schedule_changes', change.toMap(),
+          conflictAlgorithm: ConflictAlgorithm.ignore);
+    }
+    if (period != null) {
+      batch.insert('app_settings',
+          {'key': 'schedule_period_$groupId', 'value': '$period'},
+          conflictAlgorithm: ConflictAlgorithm.replace);
+    }
+
     await batch.commit(noResult: true);
   }
 
-  Future<List<ScheduleEntry>> getAllEntries() async {
+  Future<void> _createScheduleChanges(Database db) => db.execute('''
+    CREATE TABLE schedule_changes (
+      id INTEGER PRIMARY KEY AUTOINCREMENT,
+      change_key TEXT NOT NULL UNIQUE,
+      group_id TEXT NOT NULL,
+      subject TEXT NOT NULL,
+      description TEXT NOT NULL,
+      detected_at TEXT NOT NULL
+    )
+  ''');
+
+  Future<List<ScheduleChange>> getPendingScheduleChanges() async {
+    final db = await database;
+    final rows = await db.rawQuery('''
+      SELECT c.* FROM schedule_changes c
+      INNER JOIN groups g ON c.group_id = g.group_id
+      WHERE g.is_enabled = 1 AND NOT EXISTS (
+        SELECT 1 FROM subject_filters f WHERE f.group_id = c.group_id
+        AND f.subject = c.subject AND f.is_hidden = 1
+      ) ORDER BY c.id ASC LIMIT 100
+    ''');
+    return rows.map(ScheduleChange.fromMap).toList();
+  }
+
+  Future<void> acknowledgeScheduleChanges(List<int> ids) async {
+    if (ids.isEmpty) return;
+    final db = await database;
+    await db.delete('schedule_changes',
+        where: 'id IN (${List.filled(ids.length, '?').join(',')})',
+        whereArgs: ids);
+  }
+
+  Future<List<ScheduleEntry>> getEntriesForGroup(String groupId) async {
+    final db = await database;
+    final maps = await db.query('schedule_entries',
+        where: 'group_id = ?',
+        whereArgs: [groupId],
+        orderBy: 'date ASC, start_time ASC');
+    return maps.map(_entryFromMap).toList();
+  }
+
+  Future<List<ScheduleEntry>> getSavedEntries() async {
     final db = await database;
     final maps =
         await db.query('schedule_entries', orderBy: 'date ASC, start_time ASC');
@@ -366,11 +453,20 @@ class LocalDatabase {
   String _formatDate(DateTime date) =>
       '${date.year.toString().padLeft(4, '0')}-${date.month.toString().padLeft(2, '0')}-${date.day.toString().padLeft(2, '0')}';
 
-  Future<void> close() async {
-    final db = _database;
-    if (db != null) {
+  Future<void> close() {
+    if (_closing != null) return _closing!;
+    final pending = _database;
+    if (pending == null) return Future.value();
+    _database = null;
+    return _closing = _closeDatabase(pending);
+  }
+
+  Future<void> _closeDatabase(Future<Database> pending) async {
+    try {
+      final db = await pending;
       await db.close();
-      _database = null;
+    } finally {
+      _closing = null;
     }
   }
 }

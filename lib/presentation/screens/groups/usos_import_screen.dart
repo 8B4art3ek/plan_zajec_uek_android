@@ -1,4 +1,5 @@
 import 'dart:convert';
+import 'dart:async';
 
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
@@ -6,20 +7,53 @@ import 'package:webview_flutter/webview_flutter.dart';
 
 import '../../../core/theme/app_theme.dart';
 import '../../../data/datasources/auth_service.dart';
+import '../../../data/datasources/uek_login_script.dart';
 import '../../../data/datasources/usos_import_parser.dart';
+import '../../../data/datasources/plan_cas_session.dart';
+import '../../../data/datasources/schedule_group_resolver.dart';
+import '../../../data/repositories/schedule_repository_impl.dart';
 import '../../../domain/entities/schedule_entry.dart';
 import '../../../domain/entities/usos_import.dart';
 import '../../providers/providers.dart';
+import 'navigation_log.dart';
+import '../../widgets/app_scroll_view.dart';
 
 const _usosStartUrl = 'https://usosweb.uek.krakow.pl/';
 const _deanGroupsUrl =
     'https://usosweb.uek.krakow.pl/kontroler.php?_action=dla_stud/studia/grupyDziekanskie';
+const _classGroupsUrl =
+    'https://usosweb.uek.krakow.pl/kontroler.php?_action=home/grupy';
 
 const _pageSnapshotScript = r'''
 (() => {
+  const text = document.body ? document.body.innerText : '';
+  const foldedText = text.toLowerCase()
+    .normalize('NFD').replace(/[\u0300-\u036f]/g, '');
+  const loginLink = Array.from(document.querySelectorAll('a[href]')).find((link) =>
+    String(link.innerText || link.textContent || '').toLowerCase()
+      .normalize('NFD').replace(/[\u0300-\u036f]/g, '')
+      .includes('zaloguj sie')
+  );
   return JSON.stringify({
-    isLogin: Boolean(document.querySelector('input[type="password"]'))
+    isLogin: Boolean(document.querySelector('input[type="password"]')),
+    hasDeanGroupsHeading: foldedText.includes('grupy dziekanskie'),
+    hasLoginLink: Boolean(loginLink),
+    url: location.href,
+    title: document.title
   });
+})()
+''';
+
+const _clickLoginLinkScript = r'''
+(() => {
+  const fold = (value) => String(value || '').toLowerCase()
+    .normalize('NFD').replace(/[\u0300-\u036f]/g, '');
+  const loginLink = Array.from(document.querySelectorAll('a[href]')).find((link) =>
+    fold(link.innerText || link.textContent).includes('zaloguj sie')
+  );
+  if (!loginLink) return false;
+  window.location.assign(loginLink.href);
+  return true;
 })()
 ''';
 
@@ -29,22 +63,32 @@ const _scanUsosGroupsScript = r'''
     return String(value || '').replace(/\s+/g, ' ').trim();
   }
 
-  const text = clean(document.body ? document.body.innerText : '');
-  const rows = Array.from(document.querySelectorAll('tr, li, section, article, div'))
+  const rawText = document.body ? document.body.innerText : '';
+  const foldedText = rawText.toLowerCase()
+    .normalize('NFD').replace(/[\u0300-\u036f]/g, '');
+  const deanCodes = Array.from(
+    foldedText.matchAll(
+      /grupa\s+dziekanska\s*:\s*(?:[a-z0-9-]+\s*)?\[([a-z0-9-]+)\]/gi
+    )
+  ).map((match) => match[1].toUpperCase());
+  const rows = Array.from(
+    document.querySelectorAll('tr, li, section, article, div, p, td, th, dt, dd')
+  )
     .map((node) => clean(node.innerText || node.textContent))
     .filter((value) => value.length >= 4 && value.length <= 600);
 
   return JSON.stringify({
     url: location.href,
     title: document.title,
-    text: text.slice(0, 200000),
-    rows: Array.from(new Set(rows)).slice(0, 1200)
+    text: rawText.slice(0, 200000),
+    rows: Array.from(new Set(rows)).slice(0, 1200),
+    deanCodes: Array.from(new Set(deanCodes))
   });
 })()
 ''';
 
 class UsosImportScreen extends ConsumerStatefulWidget {
-  const UsosImportScreen({super.key});
+  UsosImportScreen({super.key});
 
   @override
   ConsumerState<UsosImportScreen> createState() => _UsosImportScreenState();
@@ -53,15 +97,12 @@ class UsosImportScreen extends ConsumerStatefulWidget {
 enum _ImportStep {
   deanNavigation,
   languageNavigation,
-  languageGroups,
-  languageYear,
-  languageScan,
   languageResults,
 }
 
 class _UsosImportScreenState extends ConsumerState<UsosImportScreen> {
   late final WebViewController _controller;
-  final _parser = const UsosImportParser();
+  final _parser = UsosImportParser();
   final Set<String> _selectedGroupKeys = {};
 
   Credentials? _credentials;
@@ -72,8 +113,11 @@ class _UsosImportScreenState extends ConsumerState<UsosImportScreen> {
   String _status = 'Przygotowuje import z USOS.';
   bool _isHandlingPage = false;
   bool _isImporting = false;
+  bool _isResolving = false;
   bool _completedScan = false;
   int _loginAttempts = 0;
+  bool _openedLoginPage = false;
+  final List<String> _navigationLog = [];
   _ImportStep _step = _ImportStep.deanNavigation;
 
   @override
@@ -84,9 +128,10 @@ class _UsosImportScreenState extends ConsumerState<UsosImportScreen> {
       ..setBackgroundColor(AppColors.background)
       ..setNavigationDelegate(
         NavigationDelegate(
+          onPageStarted: (url) => _recordNavigation('Otwieram: $url'),
           onPageFinished: _handlePageFinished,
           onWebResourceError: (error) {
-            if (error.isForMainFrame == true && mounted) {
+            if (error.isForMainFrame == true && mounted && !_completedScan) {
               setState(() => _error = error.description);
             }
           },
@@ -114,29 +159,46 @@ class _UsosImportScreenState extends ConsumerState<UsosImportScreen> {
       _resolution = null;
       _completedScan = false;
       _loginAttempts = 0;
+      _openedLoginPage = false;
+      _navigationLog.clear();
       _step = _ImportStep.deanNavigation;
       _status = 'Loguje do USOS tymi samymi danymi co aplikacja.';
     });
-    await _controller.loadRequest(Uri.parse(_usosStartUrl));
+    await _loadUsosPage(_usosStartUrl);
   }
 
   Future<void> _handlePageFinished(String _) async {
     if (!mounted || _isHandlingPage || _completedScan || _credentials == null) {
       return;
     }
+    _recordNavigation('Zaladowano: $_');
     _isHandlingPage = true;
 
     try {
       final snapshot = _decodeMap(
         await _controller.runJavaScriptReturningResult(_pageSnapshotScript),
       );
+      if (snapshot['hasLoginLink'] == true && !_openedLoginPage) {
+        _openedLoginPage = true;
+        _recordNavigation('Klikam: Zaloguj sie');
+        if (mounted) setState(() => _status = 'Otwieram logowanie do USOS.');
+        await _controller.runJavaScript(_clickLoginLinkScript);
+        return;
+      }
       if (snapshot['isLogin'] == true) {
         if (_loginAttempts >= 2) {
           throw Exception('USOS nie przyjal danych logowania.');
         }
         _loginAttempts++;
+        _recordNavigation('Wysylam zapisane dane logowania');
         if (mounted) setState(() => _status = 'Loguje do USOS.');
-        await _controller.runJavaScript(_loginScript(_credentials!));
+        final submitted = await _controller.runJavaScriptReturningResult(
+          buildUekLoginScript(_credentials!),
+        );
+        if (submitted != true) {
+          throw Exception(
+              'Nie znaleziono bezpiecznego formularza logowania UEK.');
+        }
         return;
       }
 
@@ -160,74 +222,24 @@ class _UsosImportScreenState extends ConsumerState<UsosImportScreen> {
         if (mounted) {
           setState(() => _status = 'Pobieram grupy dziekanskie.');
         }
-        await _controller.loadRequest(Uri.parse(_deanGroupsUrl));
+        await _loadUsosPage(_deanGroupsUrl);
         return;
       case _ImportStep.languageNavigation:
+        await _verifyDeanGroupsPage();
         _deanScan = await _scanCurrentPage();
-        _step = _ImportStep.languageGroups;
-        if (mounted) setState(() => _status = 'Otwieram Moj USOSweb.');
-        await _controller.loadRequest(Uri.parse(_usosStartUrl));
-        return;
-      case _ImportStep.languageGroups:
-        await _followLink(
-          const ['moj usosweb'],
-          nextStep: _ImportStep.languageYear,
-          status: 'Otwieram Moj USOSweb.',
-        );
-        return;
-      case _ImportStep.languageYear:
-        await _followLink(
-          const ['grupy zajeciowe'],
-          nextStep: _ImportStep.languageScan,
-          status: 'Otwieram Grupy zajeciowe.',
-        );
-        return;
-      case _ImportStep.languageScan:
-        await _chooseAcademicYear();
+        if (_deanScan!.deanCodes.isEmpty) {
+          throw Exception(
+            'Strona Grup dziekanskich zostala otwarta, ale nie znaleziono na niej wpisu "Grupa dziekanska: ... [...]".',
+          );
+        }
+        _step = _ImportStep.languageResults;
+        if (mounted) setState(() => _status = 'Otwieram grupy zajeciowe.');
+        await _loadUsosPage(_classGroupsUrl);
         return;
       case _ImportStep.languageResults:
         await _finishImport();
         return;
     }
-  }
-
-  Future<void> _followLink(
-    List<String> terms, {
-    required _ImportStep nextStep,
-    required String status,
-  }) async {
-    final raw = await _controller.runJavaScriptReturningResult(
-      _findLinkScript(terms),
-    );
-    final link = _decodeMap(raw)['url'] as String?;
-    if (link == null || link.isEmpty) {
-      throw Exception('Nie znalazlem pozycji "${terms.join(' ')}" w USOS.');
-    }
-    _step = nextStep;
-    if (mounted) setState(() => _status = status);
-    await _controller.loadRequest(Uri.parse(link));
-  }
-
-  Future<void> _chooseAcademicYear() async {
-    final year = _academicYearLabel();
-    final raw = await _controller.runJavaScriptReturningResult(
-      _chooseAcademicYearScript(year),
-    );
-    final result = _decodeMap(raw);
-    final link = result['url'] as String?;
-    final submitted = result['submitted'] == true;
-    if (link == null && !submitted) {
-      throw Exception('Nie znalazlem roku akademickiego $year w USOS.');
-    }
-    _step = _ImportStep.languageResults;
-    if (mounted) {
-      setState(() => _status = 'Pobieram grupy jezykowe z roku $year.');
-    }
-    if (link != null) {
-      await _controller.loadRequest(Uri.parse(link));
-      return;
-    }
-    // The select form has submitted itself and will trigger onPageFinished.
   }
 
   Future<UsosImportData> _scanCurrentPage() async {
@@ -236,67 +248,59 @@ class _UsosImportScreenState extends ConsumerState<UsosImportScreen> {
     );
   }
 
-  String _findLinkScript(List<String> terms) {
-    final encodedTerms = jsonEncode(terms);
-    return '''
-(() => {
-  const terms = $encodedTerms;
-  const fold = (value) => String(value || '').toLowerCase()
-    .normalize('NFD').replace(/[\\u0300-\\u036f]/g, '');
-  const link = Array.from(document.querySelectorAll('a[href]')).find((item) => {
-    const text = fold(item.innerText || item.textContent);
-    return terms.every((term) => text.includes(term));
-  });
-  return JSON.stringify({
-    url: link ? new URL(link.getAttribute('href'), location.href).href : null
-  });
-})()
-''';
-  }
-
-  String _chooseAcademicYearScript(String year) {
-    final encodedYear = jsonEncode(year);
-    return '''
-(() => {
-  const year = $encodedYear;
-  const fold = (value) => String(value || '').toLowerCase()
-    .normalize('NFD').replace(/[\\u0300-\\u036f]/g, '');
-  const link = Array.from(document.querySelectorAll('a[href]')).find((item) =>
-    fold(item.innerText || item.textContent).includes(fold(year))
-  );
-  if (link) {
-    return JSON.stringify({
-      url: new URL(link.getAttribute('href'), location.href).href,
-      submitted: false
+  void _recordNavigation(String message) {
+    if (!mounted) return;
+    final safeMessage = message.replaceFirst(RegExp(r'\?.*$'), '');
+    setState(() {
+      _navigationLog.add(safeMessage);
+      if (_navigationLog.length > 12) _navigationLog.removeAt(0);
     });
   }
-  const select = Array.from(document.querySelectorAll('select')).find((item) =>
-    Array.from(item.options).some((option) => fold(option.text).includes(fold(year)))
-  );
-  if (!select) return JSON.stringify({ url: null, submitted: false });
-  const option = Array.from(select.options).find((item) =>
-    fold(item.text).includes(fold(year))
-  );
-  select.value = option.value;
-  select.dispatchEvent(new Event('change', { bubbles: true }));
-  if (select.form) {
-    if (typeof select.form.requestSubmit === 'function') select.form.requestSubmit();
-    else select.form.submit();
-    return JSON.stringify({ url: null, submitted: true });
-  }
-  return JSON.stringify({ url: null, submitted: false });
-})()
-''';
+
+  Future<void> _loadUsosPage(String url) {
+    return _controller.loadRequest(_parseUsosUri(url));
   }
 
-  String _academicYearLabel() {
-    final now = DateTime.now();
-    final startYear = now.month >= 8 ? now.year : now.year - 1;
-    return '$startYear/${startYear + 1}';
+  Uri _parseUsosUri(String url) {
+    try {
+      return Uri.parse(url);
+    } on ArgumentError {
+      final sanitized = url.replaceAllMapped(
+        RegExp(r'%(?![0-9a-fA-F]{2})'),
+        (_) => '%25',
+      );
+      return Uri.parse(sanitized);
+    }
+  }
+
+  Future<void> _verifyDeanGroupsPage() async {
+    var snapshot = await _readPageSnapshot();
+    if (snapshot['hasDeanGroupsHeading'] == true) return;
+
+    await Future<void>.delayed(Duration(milliseconds: 700));
+    snapshot = await _readPageSnapshot();
+    if (snapshot['hasDeanGroupsHeading'] == true) return;
+
+    if (snapshot['isLogin'] == true) {
+      throw Exception('Logowanie do USOS nie powiodlo sie.');
+    }
+    final title = (snapshot['title'] as String? ?? '').trim();
+    throw Exception(
+      title.isEmpty
+          ? 'USOS nie otworzyl strony Grup dziekanskich.'
+          : 'USOS nie otworzyl strony Grup dziekanskich (aktualna strona: $title).',
+    );
+  }
+
+  Future<Map<String, dynamic>> _readPageSnapshot() async {
+    return _decodeMap(
+      await _controller.runJavaScriptReturningResult(_pageSnapshotScript),
+    );
   }
 
   Future<void> _finishImport() async {
     if (mounted) setState(() => _status = 'Dopasowuje grupy do planu UEK.');
+    _recordNavigation('Skanuje grupy jezykowe');
     final languageScan = await _scanCurrentPage();
     final deanScan = _deanScan;
     if (deanScan == null || deanScan.deanCodes.isEmpty) {
@@ -308,18 +312,61 @@ class _UsosImportScreenState extends ConsumerState<UsosImportScreen> {
       pageUrl: languageScan.pageUrl,
       pageTitle: languageScan.pageTitle,
     );
-    final resolution =
-        await ref.read(scheduleRepositoryProvider).resolveUsosGroups(scan);
+    _recordNavigation(
+      'Znaleziono: ${scan.deanCodes.length} dziekanskie, ${scan.languageGroups.length} jezykowe',
+    );
+    _recordNavigation('Szukam tych grup na planie UEK');
     if (!mounted) return;
+    setState(() => _scan = scan);
+    await _resolveScannedGroups();
+  }
+
+  Future<void> _resolveScannedGroups() async {
+    final scan = _scan;
+    if (scan == null || _isResolving) return;
     setState(() {
-      _scan = scan;
-      _resolution = resolution;
-      _selectedGroupKeys
-        ..clear()
-        ..addAll(resolution.imported.map(_groupKey));
-      _completedScan = true;
-      _status = 'Wybierz grupy, ktore chcesz dodac do planu.';
+      _isResolving = true;
+      _error = null;
+      _status = 'Grupy pobrano z USOS. Dopasowuję je do planu UEK.';
     });
+    try {
+      final resolution =
+          await ref.read(scheduleRepositoryProvider).resolveUsosGroups(scan);
+      if (!mounted) return;
+      setState(() {
+        _resolution = resolution;
+        _selectedGroupKeys
+          ..clear()
+          ..addAll(resolution.imported.map(_groupKey));
+        _completedScan = true;
+        _error = null;
+        _status = resolution.imported.isEmpty
+            ? 'Grupy pobrano z USOS, ale nie znaleziono ich w katalogu planu UEK.'
+            : 'Wybierz grupy, które chcesz dodać do planu.';
+      });
+    } catch (error) {
+      if (!mounted) return;
+      if (error is PlanLoginException) {
+        for (final step in error.steps) {
+          _recordNavigation(step);
+        }
+      }
+      setState(() {
+        _completedScan = true;
+        _status = 'Grupy zostały poprawnie pobrane z USOS.';
+        _error = switch (error) {
+          PlanLoginException() => error.message,
+          PlanCatalogException() =>
+            'Połączono ze stroną planu UEK, ale nie udało się odczytać katalogu grup. '
+                'Możliwa jest zmiana układu strony.',
+          TimeoutException() =>
+            'Przekroczono czas oczekiwania na plan UEK lub logowanie CAS. Ponów dopasowanie.',
+          _ => 'Nie udało się pobrać katalogu planu UEK. Ponów dopasowanie.',
+        };
+      });
+    } finally {
+      if (mounted) setState(() => _isResolving = false);
+    }
   }
 
   Future<void> _importSelected() async {
@@ -330,11 +377,14 @@ class _UsosImportScreenState extends ConsumerState<UsosImportScreen> {
         .toList(growable: false);
     if (selected.isEmpty) return;
 
+    final repository = ref.read(scheduleRepositoryProvider);
+    final planPeriod = await _choosePlanPeriod(repository);
+    if (planPeriod == null || !mounted) return;
+
     setState(() => _isImporting = true);
     try {
-      final result = await ref
-          .read(scheduleRepositoryProvider)
-          .importResolvedUsosGroups(selected);
+      await repository.setPlanPeriod(planPeriod);
+      final result = await repository.importResolvedUsosGroups(selected);
       ref.invalidate(groupsProvider);
       ref.invalidate(todayScheduleProvider);
       ref.invalidate(refreshInfoProvider);
@@ -362,36 +412,14 @@ class _UsosImportScreenState extends ConsumerState<UsosImportScreen> {
     }
   }
 
-  String _loginScript(Credentials credentials) {
-    final username = jsonEncode(credentials.username);
-    final password = jsonEncode(credentials.password);
-    return '''
-(() => {
-  const username = $username;
-  const password = $password;
-  const passwordInput = document.querySelector('input[type="password"]');
-  if (!passwordInput) return false;
-  const inputs = Array.from(document.querySelectorAll('input')).filter((input) =>
-    input.type !== 'hidden' && input.type !== 'password' &&
-    input.type !== 'submit' && input.type !== 'button'
-  );
-  const usernameInput = inputs.find((input) =>
-    /login|user|uid|username|identyfikator/i.test(input.name || input.id || '')
-  ) || inputs[0];
-  if (!usernameInput) return false;
-  for (const [input, value] of [[usernameInput, username], [passwordInput, password]]) {
-    input.focus();
-    input.value = value;
-    input.dispatchEvent(new Event('input', { bubbles: true }));
-    input.dispatchEvent(new Event('change', { bubbles: true }));
-  }
-  const form = passwordInput.form;
-  if (!form) return false;
-  if (typeof form.requestSubmit === 'function') form.requestSubmit();
-  else form.submit();
-  return true;
-})()
-''';
+  Future<int?> _choosePlanPeriod(ScheduleRepository repository) async {
+    final currentPeriod = await repository.getPlanPeriod();
+    if (!mounted) return null;
+
+    return showDialog<int>(
+      context: context,
+      builder: (context) => _PlanPeriodDialog(initialPeriod: currentPeriod),
+    );
   }
 
   Map<String, dynamic> _decodeMap(Object value) {
@@ -402,7 +430,7 @@ class _UsosImportScreenState extends ConsumerState<UsosImportScreen> {
     }
     if (decoded is Map<String, dynamic>) return decoded;
     if (decoded is Map) return decoded.cast<String, dynamic>();
-    throw const FormatException('Nieprawidlowy wynik z USOS.');
+    throw FormatException('Nieprawidlowy wynik z USOS.');
   }
 
   String _groupKey(ResolvedUsosGroup group) =>
@@ -418,110 +446,184 @@ class _UsosImportScreenState extends ConsumerState<UsosImportScreen> {
 
     return Scaffold(
       appBar: AppBar(
-        title: const Text('Import z USOS'),
+        title: Text('Import z USOS'),
         actions: [
           IconButton(
-            icon: const Icon(Icons.refresh_rounded),
+            icon: Icon(Icons.refresh_rounded),
             tooltip: 'Sprobuj ponownie',
-            onPressed: _isImporting ? null : _startImport,
+            onPressed: _isImporting || _isResolving ? null : _startImport,
           ),
         ],
       ),
-      body: Stack(
+      body: SafeArea(
+        top: false,
+        child: Stack(
+          children: [
+            Padding(
+              padding: const EdgeInsets.all(16),
+              child: AppScrollView(
+                  child: ListView(
+                children: [
+                  _ImportStatus(status: _status, error: _error),
+                  if (_navigationLog.isNotEmpty) ...[
+                    SizedBox(height: 16),
+                    Text(
+                      'Przebieg importu',
+                      style: TextStyle(
+                        color: AppColors.onSurface,
+                        fontSize: 14,
+                        fontWeight: FontWeight.w600,
+                      ),
+                    ),
+                    SizedBox(height: 6),
+                    NavigationLog(entries: _navigationLog),
+                  ],
+                  if (_scan != null) ...[
+                    SizedBox(height: 16),
+                    Text(
+                      'Znalezione w USOS: ${_scan!.deanCodes.length} dziekańskie, ${_scan!.languageGroups.length} językowe',
+                      style: TextStyle(
+                        color: AppColors.onSurfaceMuted,
+                        fontSize: 12,
+                      ),
+                    ),
+                  ],
+                  if (resolution != null && candidates.isEmpty) ...[
+                    SizedBox(height: 20),
+                    Text(
+                      'Nie znaleziono dopasowań w odczytanym katalogu. Nie oznacza to, że nie należysz do tych grup w USOS.',
+                      style: TextStyle(color: AppColors.warning),
+                    ),
+                  ],
+                  if (_scan != null &&
+                      (_resolution == null || candidates.isEmpty)) ...[
+                    const SizedBox(height: 12),
+                    OutlinedButton.icon(
+                      onPressed: _isResolving ? null : _resolveScannedGroups,
+                      icon: const Icon(Icons.refresh_rounded),
+                      label: Text(_isResolving
+                          ? 'Dopasowywanie…'
+                          : 'Ponów dopasowanie do planu UEK'),
+                    ),
+                  ],
+                  if (candidates.isNotEmpty) ...[
+                    SizedBox(height: 20),
+                    Text(
+                      'Wybierz grupy do dodania',
+                      style: TextStyle(
+                        color: AppColors.onSurface,
+                        fontSize: 17,
+                        fontWeight: FontWeight.w700,
+                      ),
+                    ),
+                    SizedBox(height: 8),
+                    for (final group in candidates) ...[
+                      _SelectableGroupTile(
+                        group: group,
+                        selected: _selectedGroupKeys.contains(_groupKey(group)),
+                        onChanged: (selected) => setState(() {
+                          if (selected) {
+                            _selectedGroupKeys.add(_groupKey(group));
+                          } else {
+                            _selectedGroupKeys.remove(_groupKey(group));
+                          }
+                        }),
+                      ),
+                      SizedBox(height: 8),
+                    ],
+                    SizedBox(height: 12),
+                    SizedBox(
+                      width: double.infinity,
+                      child: ElevatedButton.icon(
+                        onPressed: selectedCount == 0 || _isImporting
+                            ? null
+                            : _importSelected,
+                        icon: _isImporting
+                            ? SizedBox(
+                                width: 18,
+                                height: 18,
+                                child: CircularProgressIndicator(
+                                  strokeWidth: 2,
+                                  color:
+                                      Theme.of(context).colorScheme.onPrimary,
+                                ),
+                              )
+                            : Icon(Icons.add_circle_outline_rounded),
+                        label: Text('Dodaj wybrane ($selectedCount)'),
+                      ),
+                    ),
+                  ],
+                ],
+              )),
+            ),
+            Positioned(
+              left: 0,
+              bottom: 0,
+              width: 1,
+              height: 1,
+              child: Opacity(
+                opacity: 0,
+                child: WebViewWidget(controller: _controller),
+              ),
+            ),
+          ],
+        ),
+      ),
+    );
+  }
+}
+
+class _PlanPeriodDialog extends StatefulWidget {
+  _PlanPeriodDialog({required this.initialPeriod});
+
+  final int initialPeriod;
+
+  @override
+  State<_PlanPeriodDialog> createState() => _PlanPeriodDialogState();
+}
+
+class _PlanPeriodDialogState extends State<_PlanPeriodDialog> {
+  late int _period = widget.initialPeriod;
+
+  @override
+  Widget build(BuildContext context) {
+    return AlertDialog(
+      scrollable: true,
+      title: Text('Okres planu'),
+      content: Column(
+        mainAxisSize: MainAxisSize.min,
         children: [
-          Padding(
-            padding: const EdgeInsets.all(16),
-            child: Column(
-              crossAxisAlignment: CrossAxisAlignment.start,
-              children: [
-                _ImportStatus(status: _status, error: _error),
-                if (_scan != null) ...[
-                  const SizedBox(height: 16),
-                  Text(
-                    'Znalezione w USOS: ${_scan!.deanCodes.length} dziekanskie, ${_scan!.languageGroups.length} jezykowe',
-                    style: const TextStyle(
-                      color: AppColors.onSurfaceMuted,
-                      fontSize: 12,
-                    ),
-                  ),
-                ],
-                if (resolution != null && candidates.isEmpty) ...[
-                  const SizedBox(height: 20),
-                  const Text(
-                    'Nie udalo sie dopasowac zadnej grupy do planu UEK.',
-                    style: TextStyle(color: AppColors.warning),
-                  ),
-                ],
-                if (candidates.isNotEmpty) ...[
-                  const SizedBox(height: 20),
-                  const Text(
-                    'Wybierz grupy do dodania',
-                    style: TextStyle(
-                      color: AppColors.onSurface,
-                      fontSize: 17,
-                      fontWeight: FontWeight.w700,
-                    ),
-                  ),
-                  const SizedBox(height: 8),
-                  Expanded(
-                    child: ListView.separated(
-                      itemCount: candidates.length,
-                      separatorBuilder: (context, index) =>
-                          const SizedBox(height: 8),
-                      itemBuilder: (context, index) {
-                        final group = candidates[index];
-                        final key = _groupKey(group);
-                        return _SelectableGroupTile(
-                          group: group,
-                          selected: _selectedGroupKeys.contains(key),
-                          onChanged: (selected) => setState(() {
-                            if (selected) {
-                              _selectedGroupKeys.add(key);
-                            } else {
-                              _selectedGroupKeys.remove(key);
-                            }
-                          }),
-                        );
-                      },
-                    ),
-                  ),
-                  const SizedBox(height: 12),
-                  SizedBox(
-                    width: double.infinity,
-                    child: ElevatedButton.icon(
-                      onPressed: selectedCount == 0 || _isImporting
-                          ? null
-                          : _importSelected,
-                      icon: _isImporting
-                          ? const SizedBox(
-                              width: 18,
-                              height: 18,
-                              child: CircularProgressIndicator(
-                                strokeWidth: 2,
-                                color: Colors.white,
-                              ),
-                            )
-                          : const Icon(Icons.add_circle_outline_rounded),
-                      label: Text('Dodaj wybrane ($selectedCount)'),
-                    ),
-                  ),
-                ] else
-                  const Spacer(),
-              ],
-            ),
+          Align(
+            alignment: Alignment.centerLeft,
+            child: Text('Wybierz okres, z którego pobrać zajęcia.'),
           ),
-          Positioned(
-            left: 0,
-            bottom: 0,
-            width: 1,
-            height: 1,
-            child: Opacity(
-              opacity: 0,
-              child: WebViewWidget(controller: _controller),
+          SizedBox(height: 8),
+          for (final period in ScheduleRepository.planPeriods)
+            ListTile(
+              contentPadding: EdgeInsets.zero,
+              title: Text('Okres $period'),
+              trailing: Icon(
+                _period == period
+                    ? Icons.check_circle_rounded
+                    : Icons.circle_outlined,
+                color: _period == period
+                    ? AppColors.primary
+                    : AppColors.onSurfaceMuted,
+              ),
+              onTap: () => setState(() => _period = period),
             ),
-          ),
         ],
       ),
+      actions: [
+        TextButton(
+          onPressed: () => Navigator.of(context).pop(),
+          child: Text('Anuluj'),
+        ),
+        ElevatedButton(
+          onPressed: () => Navigator.of(context).pop(_period),
+          child: Text('Dodaj grupy'),
+        ),
+      ],
     );
   }
 }
@@ -530,7 +632,7 @@ class _ImportStatus extends StatelessWidget {
   final String status;
   final String? error;
 
-  const _ImportStatus({required this.status, required this.error});
+  _ImportStatus({required this.status, required this.error});
 
   @override
   Widget build(BuildContext context) {
@@ -556,11 +658,11 @@ class _ImportStatus extends StatelessWidget {
             hasError ? Icons.error_outline_rounded : Icons.sync_rounded,
             color: hasError ? AppColors.error : AppColors.primary,
           ),
-          const SizedBox(width: 10),
+          SizedBox(width: 10),
           Expanded(
             child: Text(
               error == null ? status : '$status\n$error',
-              style: const TextStyle(
+              style: TextStyle(
                 color: AppColors.onSurface,
                 fontSize: 13,
                 height: 1.35,
@@ -578,7 +680,7 @@ class _SelectableGroupTile extends StatelessWidget {
   final bool selected;
   final ValueChanged<bool> onChanged;
 
-  const _SelectableGroupTile({
+  _SelectableGroupTile({
     required this.group,
     required this.selected,
     required this.onChanged,
@@ -596,7 +698,7 @@ class _SelectableGroupTile extends StatelessWidget {
         controlAffinity: ListTileControlAffinity.trailing,
         title: Text(
           group.scheduleCode,
-          style: const TextStyle(
+          style: TextStyle(
             color: AppColors.onSurface,
             fontSize: 14,
             fontWeight: FontWeight.w600,
@@ -604,7 +706,7 @@ class _SelectableGroupTile extends StatelessWidget {
         ),
         subtitle: Text(
           '${group.groupType.label} - ${group.sourceLabel}',
-          style: const TextStyle(
+          style: TextStyle(
             color: AppColors.onSurfaceMuted,
             fontSize: 12,
           ),

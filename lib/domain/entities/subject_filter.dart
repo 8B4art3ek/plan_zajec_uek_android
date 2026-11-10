@@ -12,18 +12,4 @@ class SubjectFilter {
     required this.groupId,
     required this.isHidden,
   });
-
-  SubjectFilter copyWith({
-    int? id,
-    String? subject,
-    String? groupId,
-    bool? isHidden,
-  }) {
-    return SubjectFilter(
-      id: id ?? this.id,
-      subject: subject ?? this.subject,
-      groupId: groupId ?? this.groupId,
-      isHidden: isHidden ?? this.isHidden,
-    );
-  }
 }

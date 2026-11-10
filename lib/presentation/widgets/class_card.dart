@@ -13,7 +13,7 @@ class ClassCard extends StatelessWidget {
   final bool compact;
   final Map<String, Color> classTypeColors;
 
-  const ClassCard({
+  ClassCard({
     super.key,
     required this.entry,
     this.onTap,
@@ -31,7 +31,6 @@ class ClassCard extends StatelessWidget {
     final card = entry.isMoved
         ? _MovedClassCard(
             entry: entry,
-            typeColor: typeColor,
             margin: margin,
             compact: compact,
           )
@@ -59,7 +58,7 @@ class _NormalClassCard extends StatelessWidget {
   final EdgeInsetsGeometry margin;
   final bool compact;
 
-  const _NormalClassCard({
+  _NormalClassCard({
     required this.entry,
     required this.typeColor,
     required this.margin,
@@ -68,14 +67,15 @@ class _NormalClassCard extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    final contentPadding =
-        compact ? const EdgeInsets.all(12) : const EdgeInsets.all(14);
+    const contentPadding = EdgeInsets.all(14);
 
     return Container(
       margin: margin,
+      height:
+          _cardHeight(context, extraLines: entry.studentGroups.isEmpty ? 0 : 1),
       decoration: BoxDecoration(
         color: AppColors.surface,
-        borderRadius: BorderRadius.circular(16),
+        borderRadius: BorderRadius.circular(8),
         border: Border(
           left: BorderSide(color: typeColor, width: 4),
         ),
@@ -83,6 +83,7 @@ class _NormalClassCard extends StatelessWidget {
       child: Padding(
         padding: contentPadding,
         child: Column(
+          mainAxisAlignment: MainAxisAlignment.center,
           crossAxisAlignment: CrossAxisAlignment.start,
           children: [
             _ClassTitle(
@@ -91,39 +92,49 @@ class _NormalClassCard extends StatelessWidget {
               color: typeColor,
               compact: compact,
             ),
-            const SizedBox(height: 8),
+            if (entry.studentGroups.isNotEmpty) ...[
+              const SizedBox(height: 4),
+              _StudentGroups(value: entry.studentGroups),
+            ],
+            SizedBox(height: 8),
             Row(
               children: [
-                const Icon(
+                Icon(
                   Icons.access_time_rounded,
                   size: 14,
                   color: AppColors.onSurfaceMuted,
                 ),
-                const SizedBox(width: 4),
-                Text(
-                  _formatTimeRange(entry.startTime, entry.endTime),
-                  style: const TextStyle(
-                    color: AppColors.onSurfaceMuted,
-                    fontSize: 13,
-                    fontWeight: FontWeight.w500,
+                SizedBox(width: 4),
+                Expanded(
+                  child: Text(
+                    _formatTimeRange(entry.startTime, entry.endTime),
+                    maxLines: 1,
+                    overflow: TextOverflow.ellipsis,
+                    style: TextStyle(
+                      color: AppColors.onSurfaceMuted,
+                      fontSize: 13,
+                      fontWeight: FontWeight.w500,
+                    ),
                   ),
                 ),
               ],
             ),
             if (entry.lecturer.isNotEmpty) ...[
-              const SizedBox(height: 4),
+              SizedBox(height: 4),
               Row(
                 children: [
-                  const Icon(
+                  Icon(
                     Icons.person_outline_rounded,
                     size: 14,
                     color: AppColors.onSurfaceMuted,
                   ),
-                  const SizedBox(width: 4),
+                  SizedBox(width: 4),
                   Expanded(
                     child: Text(
                       entry.lecturer,
-                      style: const TextStyle(
+                      maxLines: 1,
+                      overflow: TextOverflow.ellipsis,
+                      style: TextStyle(
                         color: AppColors.onSurfaceMuted,
                         fontSize: 13,
                       ),
@@ -133,20 +144,21 @@ class _NormalClassCard extends StatelessWidget {
               ),
             ],
             if (entry.room.isNotEmpty) ...[
-              const SizedBox(height: 4),
+              SizedBox(height: 4),
               Row(
                 children: [
-                  const Icon(
+                  Icon(
                     Icons.room_outlined,
                     size: 14,
                     color: AppColors.onSurfaceMuted,
                   ),
-                  const SizedBox(width: 4),
+                  SizedBox(width: 4),
                   Expanded(
                     child: Text(
                       entry.room,
-                      softWrap: true,
-                      style: const TextStyle(
+                      maxLines: 1,
+                      overflow: TextOverflow.ellipsis,
+                      style: TextStyle(
                         color: AppColors.onSurfaceMuted,
                         fontSize: 13,
                       ),
@@ -164,21 +176,18 @@ class _NormalClassCard extends StatelessWidget {
 
 class _MovedClassCard extends StatelessWidget {
   final ScheduleEntry entry;
-  final Color typeColor;
   final EdgeInsetsGeometry margin;
   final bool compact;
 
-  const _MovedClassCard({
+  _MovedClassCard({
     required this.entry,
-    required this.typeColor,
     required this.margin,
     required this.compact,
   });
 
   @override
   Widget build(BuildContext context) {
-    final contentPadding =
-        compact ? const EdgeInsets.all(12) : const EdgeInsets.all(14);
+    const contentPadding = EdgeInsets.all(14);
     final newDate = entry.newDate;
     final newStart = entry.newStartTime;
     final newEnd = entry.newEndTime;
@@ -190,9 +199,11 @@ class _MovedClassCard extends StatelessWidget {
 
     return Container(
       margin: margin,
+      height:
+          _cardHeight(context, extraLines: entry.studentGroups.isEmpty ? 0 : 1),
       decoration: BoxDecoration(
         color: AppColors.surface.withValues(alpha: 0.7),
-        borderRadius: BorderRadius.circular(16),
+        borderRadius: BorderRadius.circular(8),
         border: Border(
           left: BorderSide(
             color: AppColors.warning.withValues(alpha: 0.6),
@@ -203,9 +214,10 @@ class _MovedClassCard extends StatelessWidget {
       child: Padding(
         padding: contentPadding,
         child: Column(
+          mainAxisAlignment: MainAxisAlignment.center,
           crossAxisAlignment: CrossAxisAlignment.start,
           children: [
-            const Row(
+            Row(
               children: [
                 Icon(
                   Icons.swap_horiz_rounded,
@@ -221,34 +233,41 @@ class _MovedClassCard extends StatelessWidget {
                       color: AppColors.warning,
                       fontSize: 11,
                       fontWeight: FontWeight.w700,
-                      letterSpacing: 0.5,
                     ),
                   ),
                 ),
               ],
             ),
-            const SizedBox(height: 6),
+            SizedBox(height: 6),
             Text(
               entry.subject,
+              maxLines: 1,
+              overflow: TextOverflow.ellipsis,
               style: TextStyle(
                 color: AppColors.onSurfaceMuted,
                 fontWeight: FontWeight.w600,
-                fontSize: compact ? 14 : 15,
+                fontSize: 15,
                 decoration: TextDecoration.lineThrough,
                 decorationColor: AppColors.onSurfaceMuted,
               ),
             ),
-            const SizedBox(height: 4),
+            if (entry.studentGroups.isNotEmpty) ...[
+              const SizedBox(height: 4),
+              _StudentGroups(value: entry.studentGroups),
+            ],
+            SizedBox(height: 4),
             Text(
               _formatTimeRange(entry.startTime, entry.endTime),
+              maxLines: 1,
+              overflow: TextOverflow.ellipsis,
               style: TextStyle(
                 color: AppColors.onSurfaceMuted,
-                fontSize: compact ? 12 : 13,
+                fontSize: 13,
                 decoration: TextDecoration.lineThrough,
               ),
             ),
             if (newDateText != null) ...[
-              const SizedBox(height: 8),
+              SizedBox(height: 8),
               Container(
                 padding: const EdgeInsets.symmetric(
                   horizontal: 10,
@@ -260,7 +279,9 @@ class _MovedClassCard extends StatelessWidget {
                 ),
                 child: Text(
                   'Przeniesione na: $newDateText${newTimeText == null ? '' : ' $newTimeText'}',
-                  style: const TextStyle(
+                  maxLines: 2,
+                  overflow: TextOverflow.ellipsis,
+                  style: TextStyle(
                     color: AppColors.warning,
                     fontSize: 13,
                     fontWeight: FontWeight.w500,
@@ -281,7 +302,7 @@ class _ClassTitle extends StatelessWidget {
   final Color color;
   final bool compact;
 
-  const _ClassTitle({
+  _ClassTitle({
     required this.subject,
     required this.classType,
     required this.color,
@@ -292,11 +313,12 @@ class _ClassTitle extends StatelessWidget {
   Widget build(BuildContext context) {
     final title = Text(
       subject,
-      softWrap: true,
+      maxLines: 1,
+      overflow: TextOverflow.ellipsis,
       style: TextStyle(
         color: AppColors.onSurface,
         fontWeight: FontWeight.w600,
-        fontSize: compact ? 14 : 15,
+        fontSize: 15,
       ),
     );
 
@@ -304,8 +326,8 @@ class _ClassTitle extends StatelessWidget {
       crossAxisAlignment: CrossAxisAlignment.start,
       children: [
         title,
-        SizedBox(height: compact ? 5 : 6),
-        _TypeChip(classType: classType, color: color, compact: compact),
+        SizedBox(height: 6),
+        _TypeChip(classType: classType, color: color),
       ],
     );
   }
@@ -314,7 +336,7 @@ class _ClassTitle extends StatelessWidget {
 class BreakBlock extends StatelessWidget {
   final int minutes;
 
-  const BreakBlock({super.key, required this.minutes});
+  BreakBlock({super.key, required this.minutes});
 
   String get _durationLabel {
     if (minutes > 59) {
@@ -340,21 +362,22 @@ class BreakBlock extends StatelessWidget {
               borderRadius: BorderRadius.circular(1),
             ),
           ),
-          const SizedBox(width: 12),
+          SizedBox(width: 12),
           Icon(
             Icons.hourglass_empty_rounded,
             size: 13,
             color: AppColors.onSurfaceMuted.withValues(alpha: 0.6),
           ),
-          const SizedBox(width: 6),
-          Text(
+          SizedBox(width: 6),
+          Flexible(
+              child: Text(
             'Przerwa - $_durationLabel',
             style: TextStyle(
               color: AppColors.onSurfaceMuted.withValues(alpha: 0.7),
               fontSize: 12,
               fontWeight: FontWeight.w500,
             ),
-          ),
+          )),
         ],
       ),
     );
@@ -364,30 +387,34 @@ class BreakBlock extends StatelessWidget {
 class _TypeChip extends StatelessWidget {
   final String classType;
   final Color color;
-  final bool compact;
 
-  const _TypeChip({
+  _TypeChip({
     required this.classType,
     required this.color,
-    this.compact = false,
   });
 
   @override
   Widget build(BuildContext context) {
+    final background = Color.alphaBlend(
+      color.withValues(alpha: 0.18),
+      AppColors.surface,
+    );
     return Container(
-      padding: EdgeInsets.symmetric(
-        horizontal: compact ? 6 : 8,
-        vertical: compact ? 2 : 3,
+      padding: const EdgeInsets.symmetric(
+        horizontal: 8,
+        vertical: 3,
       ),
       decoration: BoxDecoration(
-        color: color.withValues(alpha: 0.18),
+        color: background,
         borderRadius: BorderRadius.circular(6),
       ),
       child: Text(
         classType,
+        maxLines: 1,
+        overflow: TextOverflow.ellipsis,
         style: TextStyle(
-          color: color,
-          fontSize: compact ? 10 : 11,
+          color: AppColors.readableAccent(color, background),
+          fontSize: 11,
           fontWeight: FontWeight.w600,
         ),
       ),
@@ -396,6 +423,53 @@ class _TypeChip extends StatelessWidget {
 }
 
 typedef ScheduleEntryCallback = void Function(ScheduleEntry entry);
+
+double _cardHeight(BuildContext context, {int extraLines = 0}) {
+  double lineHeight(double size) {
+    final painter = TextPainter(
+      text: TextSpan(
+          text: 'Ag',
+          style: DefaultTextStyle.of(context)
+              .style
+              .merge(TextStyle(fontSize: size))),
+      textScaler: MediaQuery.textScalerOf(context),
+      textDirection: Directionality.of(context),
+      maxLines: 1,
+    )..layout();
+    final height = painter.height;
+    painter.dispose();
+    return height;
+  }
+
+  final title = lineHeight(15);
+  final chip = lineHeight(11);
+  final detail = lineHeight(13);
+  final metadata = detail < 14 ? 14.0 : detail;
+  final normal = title + 6 + chip + 6 + 8 + metadata * 3 + 8;
+  final moved =
+      (chip < 16 ? 16.0 : chip) + 6 + title + 4 + detail + 8 + detail * 2 + 12;
+  return ((normal > moved ? normal : moved) + 28 + extraLines * (metadata + 4))
+      .ceilToDouble();
+}
+
+class _StudentGroups extends StatelessWidget {
+  const _StudentGroups({required this.value});
+  final String value;
+  @override
+  Widget build(BuildContext context) => Tooltip(
+        message: value,
+        child: Row(children: [
+          Icon(Icons.groups_outlined,
+              size: 14, color: AppColors.onSurfaceMuted),
+          const SizedBox(width: 4),
+          Expanded(
+              child: Text(value,
+                  maxLines: 1,
+                  overflow: TextOverflow.ellipsis,
+                  style: TextStyle(fontSize: 13, color: AppColors.onSurface))),
+        ]),
+      );
+}
 
 List<Widget> buildScheduleWidgets(
   List<ScheduleEntry> entries, {
@@ -439,7 +513,9 @@ bool _shouldShowBreak(int minutes) => minutes > 0 && minutes != 15;
 List<_ScheduleSlot> _buildScheduleSlots(List<ScheduleEntry> entries) {
   final slots = <_ScheduleSlot>[];
 
-  for (final entry in entries) {
+  final sorted = [...entries]
+    ..sort((a, b) => a.startTime.compareTo(b.startTime));
+  for (final entry in sorted) {
     if (slots.isNotEmpty && slots.last.startTime == entry.startTime) {
       slots.last.entries.add(entry);
     } else {
@@ -467,27 +543,36 @@ Widget _buildSlotWidget(
     );
   }
 
-  return Padding(
-    padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 4),
-    child: IntrinsicHeight(
-      child: Row(
-        crossAxisAlignment: CrossAxisAlignment.stretch,
+  return LayoutBuilder(builder: (context, constraints) {
+    final scale = MediaQuery.textScalerOf(context).scale(15) / 15;
+    final columns = ((constraints.maxWidth - 32 + 8) / (148 * scale + 8))
+        .floor()
+        .clamp(1, 2);
+    return Padding(
+      padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 4),
+      child: Column(
         children: [
-          for (int i = 0; i < slot.entries.length; i++) ...[
-            if (i > 0) const SizedBox(width: 8),
-            Expanded(
-              child: _buildCompactEntryCard(
-                slot.entries[i],
-                onEntryTap,
-                onEntryLongPress,
-                classTypeColors,
-              ),
-            ),
+          for (int start = 0;
+              start < slot.entries.length;
+              start += columns) ...[
+            if (start > 0) SizedBox(height: 8),
+            Row(crossAxisAlignment: CrossAxisAlignment.start, children: [
+              for (int i = start;
+                  i < start + columns && i < slot.entries.length;
+                  i++) ...[
+                if (i > start) SizedBox(width: 8),
+                Expanded(
+                    child: _buildCompactEntryCard(slot.entries[i], onEntryTap,
+                        onEntryLongPress, classTypeColors)),
+              ],
+              if (columns > 1 && start + 1 == slot.entries.length)
+                const Expanded(child: SizedBox()),
+            ]),
           ],
         ],
       ),
-    ),
-  );
+    );
+  });
 }
 
 Widget _buildCompactEntryCard(
@@ -508,9 +593,8 @@ Widget _buildCompactEntryCard(
 }
 
 int? _breakAfterSlot(List<_ScheduleSlot> slots, int index) {
-  final slot = slots[index];
   final nextSlot = slots[index + 1];
-  final currentActiveEnd = slot.activeEndMinutes;
+  final currentActiveEnd = _latestActiveEnd(slots, index);
   final nextActiveStart = nextSlot.activeStartMinutes;
 
   if (currentActiveEnd != null) {
@@ -519,21 +603,18 @@ int? _breakAfterSlot(List<_ScheduleSlot> slots, int index) {
     return nextActiveStart - currentActiveEnd;
   }
 
-  if (!slot.hasMovedOnly || !nextSlot.hasActive) return null;
-
-  final previousEnd = _previousActiveEnd(slots, index);
-  final nextStart = nextSlot.activeStartMinutes;
-  if (previousEnd == null || nextStart == null) return null;
-
-  return nextStart - previousEnd;
+  return null;
 }
 
-int? _previousActiveEnd(List<_ScheduleSlot> slots, int index) {
-  for (int i = index - 1; i >= 0; i--) {
+int? _latestActiveEnd(List<_ScheduleSlot> slots, int index) {
+  int? latest;
+  for (int i = 0; i <= index; i++) {
     final activeEnd = slots[i].activeEndMinutes;
-    if (activeEnd != null) return activeEnd;
+    if (activeEnd != null && (latest == null || activeEnd > latest)) {
+      latest = activeEnd;
+    }
   }
-  return null;
+  return latest;
 }
 
 int? _timeToMinutes(String time) {
@@ -553,8 +634,6 @@ class _ScheduleSlot {
   final List<ScheduleEntry> entries;
 
   _ScheduleSlot(this.startTime, this.entries);
-
-  bool get hasActive => entries.any((entry) => !entry.isMoved);
 
   bool get hasMovedOnly => entries.every((entry) => entry.isMoved);
 

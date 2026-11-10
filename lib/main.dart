@@ -2,12 +2,15 @@
 
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
+import 'core/app_identity.dart';
 import 'core/theme/app_theme.dart';
 import 'data/datasources/background_service.dart';
 import 'data/datasources/notification_service.dart';
 import 'presentation/providers/providers.dart';
 import 'presentation/screens/login_screen.dart';
 import 'presentation/screens/main_shell.dart';
+import 'presentation/screens/university_screen.dart';
+import 'presentation/widgets/app_viewport.dart';
 
 void main() async {
   WidgetsFlutterBinding.ensureInitialized();
@@ -20,47 +23,67 @@ void main() async {
   await BackgroundService.init();
   await BackgroundService.schedulePeriodicRefresh();
 
-  runApp(const ProviderScope(child: PlanZajecApp()));
+  runApp(ProviderScope(child: PlanZajecApp()));
 }
 
 class PlanZajecApp extends ConsumerWidget {
-  const PlanZajecApp({super.key});
+  PlanZajecApp({super.key});
 
   @override
   Widget build(BuildContext context, WidgetRef ref) {
+    final selectedTheme =
+        ref.watch(appThemeProvider).valueOrNull ?? AppThemeKind.midnight;
     return MaterialApp(
-      title: 'Plan Zajec UEK',
+      title: appName,
       debugShowCheckedModeBanner: false,
-      theme: AppTheme.darkTheme,
-      darkTheme: AppTheme.darkTheme,
-      themeMode: ThemeMode.dark,
+      theme: AppTheme.themeFor(selectedTheme,
+          colors: ref.watch(customThemeColorsProvider).valueOrNull ?? const {}),
+      themeMode: ThemeMode.light,
+      builder: (context, child) => AppViewport(child: child!),
       initialRoute: '/splash',
       routes: {
-        '/splash': (_) => const SplashScreen(),
-        '/login': (_) => const LoginScreen(),
-        '/home': (_) => const MainShell(),
+        '/splash': (_) => SplashScreen(),
+        '/login': (_) => LoginScreen(),
+        '/university': (_) => const UniversityScreen(),
+        '/home': (_) => MainShell(),
       },
     );
   }
 }
 
-class SplashScreen extends ConsumerWidget {
-  const SplashScreen({super.key});
+class SplashScreen extends ConsumerStatefulWidget {
+  SplashScreen({super.key});
 
   @override
-  Widget build(BuildContext context, WidgetRef ref) {
+  ConsumerState<SplashScreen> createState() => _SplashScreenState();
+}
+
+class _SplashScreenState extends ConsumerState<SplashScreen> {
+  bool _navigating = false;
+
+  void _navigate(String route) {
+    if (_navigating) return;
+    _navigating = true;
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      if (mounted) Navigator.of(context).pushReplacementNamed(route);
+    });
+  }
+
+  @override
+  Widget build(BuildContext context) {
     final isLoggedIn = ref.watch(isLoggedInProvider);
+    final university = ref.watch(universityProvider);
 
     return isLoggedIn.when(
-      loading: () => const Scaffold(
+      loading: () => Scaffold(
         body: Center(
           child: Column(
             mainAxisAlignment: MainAxisAlignment.center,
             children: [
-              Icon(Icons.school_rounded, color: AppColors.primary, size: 64),
+              Image.asset(appIconAsset, width: 80, height: 80),
               SizedBox(height: 24),
               Text(
-                'Plan Zajec UEK',
+                appName,
                 style: TextStyle(
                   color: AppColors.onSurface,
                   fontSize: 24,
@@ -74,20 +97,20 @@ class SplashScreen extends ConsumerWidget {
         ),
       ),
       error: (_, __) {
-        WidgetsBinding.instance.addPostFrameCallback((_) {
-          Navigator.of(context).pushReplacementNamed('/login');
-        });
-        return const Scaffold(body: SizedBox.shrink());
+        _navigate('/university');
+        return Scaffold(body: SizedBox.shrink());
       },
       data: (loggedIn) {
-        WidgetsBinding.instance.addPostFrameCallback((_) {
-          if (loggedIn) {
-            Navigator.of(context).pushReplacementNamed('/home');
-          } else {
-            Navigator.of(context).pushReplacementNamed('/login');
-          }
-        });
-        return const Scaffold(
+        if (!loggedIn && university.isLoading) {
+          return const Scaffold(
+              body: Center(child: CircularProgressIndicator()));
+        }
+        _navigate(loggedIn
+            ? '/home'
+            : university.valueOrNull == null
+                ? '/university'
+                : '/login');
+        return Scaffold(
           body: Center(
             child: CircularProgressIndicator(color: AppColors.primary),
           ),

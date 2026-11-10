@@ -1,28 +1,30 @@
 // lib/presentation/screens/groups/groups_screen.dart
 
 import 'package:flutter/material.dart';
+import '../../../core/app_failure.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import '../../../core/theme/app_theme.dart';
 import '../../../domain/entities/group.dart';
 import '../../../domain/entities/schedule_entry.dart';
 import '../../providers/providers.dart';
 import 'usos_import_screen.dart';
+import '../../widgets/app_scroll_view.dart';
+import '../../widgets/failure_view.dart';
 
 class GroupsScreen extends ConsumerWidget {
-  const GroupsScreen({super.key});
+  GroupsScreen({super.key});
 
   @override
   Widget build(BuildContext context, WidgetRef ref) {
     final groupsAsync = ref.watch(groupsProvider);
 
     return Scaffold(
-      appBar: AppBar(title: const Text('Grupy')),
+      appBar: AppBar(title: Text('Moje grupy')),
       body: groupsAsync.when(
-        loading: () => const Center(
-            child: CircularProgressIndicator(color: AppColors.primary)),
-        error: (e, _) => Center(
-            child: Text(e.toString(),
-                style: const TextStyle(color: AppColors.error))),
+        loading: () =>
+            Center(child: CircularProgressIndicator(color: AppColors.primary)),
+        error: (e, _) => FailureView(
+            error: e, onRetry: () => ref.invalidate(groupsProvider)),
         data: (groups) {
           final deanGroups =
               groups.where((g) => g.groupType == GroupType.dean).toList();
@@ -31,72 +33,71 @@ class GroupsScreen extends ConsumerWidget {
           final peGroups =
               groups.where((g) => g.groupType == GroupType.pe).toList();
 
-          return ListView(
+          return AppScrollView(
+              child: ListView(
             padding: const EdgeInsets.all(16),
             children: [
               _ImportUsosButton(
                 onTap: () => _openUsosImport(context, ref),
               ),
-              const SizedBox(height: 20),
-              const _SectionHeader(
-                title: 'Grupy dziekanskie',
+              SizedBox(height: 20),
+              _SectionHeader(
+                title: 'Grupy dziekańskie',
                 icon: Icons.school_rounded,
                 color: AppColors.primary,
               ),
-              const SizedBox(height: 8),
+              SizedBox(height: 8),
               ...deanGroups.map((g) => _GroupTile(group: g)),
               _AddGroupButton(
-                label: 'Dodaj grupe dziekanska',
-                onTap: () => _showAddGroupDialog(
-                    context, ref, GroupType.dean, deanGroups.length),
+                label: 'Dodaj grupę dziekańską',
+                onTap: () => _showAddGroupDialog(context, ref, GroupType.dean),
               ),
-              const SizedBox(height: 24),
-              const _SectionHeader(
-                title: 'Grupy jezykowe (max 2)',
+              SizedBox(height: 24),
+              _SectionHeader(
+                title: 'Grupy językowe',
                 icon: Icons.language_rounded,
                 color: AppColors.lektorat,
               ),
-              const SizedBox(height: 8),
+              SizedBox(height: 8),
               ...langGroups.map((g) => _GroupTile(group: g)),
               if (langGroups.length < 2)
                 _AddGroupButton(
-                  label: 'Dodaj grupe jezykowa',
-                  onTap: () => _showAddGroupDialog(
-                      context, ref, GroupType.language, langGroups.length),
+                  label: 'Dodaj grupę językową',
+                  onTap: () =>
+                      _showAddGroupDialog(context, ref, GroupType.language),
                 ),
               if (langGroups.length >= 2)
-                const Padding(
+                Padding(
                   padding: EdgeInsets.symmetric(vertical: 4),
                   child: Text(
-                    'Osiagnięto limit 2 grup jezykowych',
+                    'Osiągnięto limit 2 grup językowych',
                     style: TextStyle(
                         color: AppColors.onSurfaceMuted, fontSize: 13),
                   ),
                 ),
-              const SizedBox(height: 24),
-              const _SectionHeader(
+              SizedBox(height: 24),
+              _SectionHeader(
                 title: 'Grupy WF',
                 icon: Icons.fitness_center_rounded,
                 color: AppColors.wf,
               ),
-              const SizedBox(height: 8),
+              SizedBox(height: 8),
               ...peGroups.map((g) => _GroupTile(group: g)),
               _AddGroupButton(
-                label: 'Dodaj grupe WF',
-                onTap: () => _showAddGroupDialog(
-                    context, ref, GroupType.pe, peGroups.length),
+                label: 'Dodaj grupę WF',
+                onTap: () => _showAddGroupDialog(context, ref, GroupType.pe),
               ),
-              const SizedBox(height: 32),
-              const _InfoCard(),
+              SizedBox(height: 32),
+              _InfoCard(),
             ],
-          );
+          ));
         },
       ),
     );
   }
 
   void _showAddGroupDialog(
-      BuildContext context, WidgetRef ref, GroupType type, int currentCount) {
+      BuildContext context, WidgetRef ref, GroupType type) {
     showDialog(
       context: context,
       builder: (_) => _AddGroupDialog(type: type, widgetRef: ref),
@@ -105,9 +106,9 @@ class GroupsScreen extends ConsumerWidget {
 
   Future<void> _openUsosImport(BuildContext context, WidgetRef ref) async {
     final changed = await Navigator.of(context).push<bool>(
-      MaterialPageRoute(builder: (_) => const UsosImportScreen()),
+      MaterialPageRoute(builder: (_) => UsosImportScreen()),
     );
-    if (changed == true) {
+    if (context.mounted && changed == true) {
       ref.invalidate(groupsProvider);
       ref.invalidate(todayScheduleProvider);
       ref.invalidate(refreshInfoProvider);
@@ -120,7 +121,7 @@ class _SectionHeader extends StatelessWidget {
   final IconData icon;
   final Color color;
 
-  const _SectionHeader({
+  _SectionHeader({
     required this.title,
     required this.icon,
     required this.color,
@@ -138,15 +139,16 @@ class _SectionHeader extends StatelessWidget {
           ),
           child: Icon(icon, color: color, size: 18),
         ),
-        const SizedBox(width: 10),
-        Text(
+        SizedBox(width: 10),
+        Expanded(
+            child: Text(
           title,
-          style: const TextStyle(
+          style: TextStyle(
             color: AppColors.onSurface,
             fontSize: 15,
             fontWeight: FontWeight.w700,
           ),
-        ),
+        )),
       ],
     );
   }
@@ -155,7 +157,7 @@ class _SectionHeader extends StatelessWidget {
 class _GroupTile extends ConsumerWidget {
   final Group group;
 
-  const _GroupTile({required this.group});
+  _GroupTile({required this.group});
 
   @override
   Widget build(BuildContext context, WidgetRef ref) {
@@ -165,32 +167,34 @@ class _GroupTile extends ConsumerWidget {
       margin: const EdgeInsets.only(bottom: 8),
       decoration: BoxDecoration(
         color: AppColors.surface,
-        borderRadius: BorderRadius.circular(14),
+        borderRadius: BorderRadius.circular(8),
         border: Border(left: BorderSide(color: color, width: 3)),
       ),
       child: ListTile(
         contentPadding: const EdgeInsets.symmetric(horizontal: 16, vertical: 4),
-        leading: Container(
-          width: 40,
-          height: 40,
-          decoration: BoxDecoration(
-            color: color.withValues(alpha: 0.15),
-            borderRadius: BorderRadius.circular(10),
-          ),
-          child: Center(
-            child: Text(
-              group.groupType.label[0],
-              style: TextStyle(
-                color: color,
-                fontWeight: FontWeight.w700,
-                fontSize: 16,
+        leading: MediaQuery.sizeOf(context).width < 420
+            ? null
+            : Container(
+                width: 40,
+                height: 40,
+                decoration: BoxDecoration(
+                  color: color.withValues(alpha: 0.15),
+                  borderRadius: BorderRadius.circular(10),
+                ),
+                child: Center(
+                  child: Text(
+                    group.groupType.label[0],
+                    style: TextStyle(
+                      color: color,
+                      fontWeight: FontWeight.w700,
+                      fontSize: 16,
+                    ),
+                  ),
+                ),
               ),
-            ),
-          ),
-        ),
         title: Text(
           group.name ?? 'ID: ${group.groupId}',
-          style: const TextStyle(
+          style: TextStyle(
             color: AppColors.onSurface,
             fontWeight: FontWeight.w600,
             fontSize: 14,
@@ -200,7 +204,7 @@ class _GroupTile extends ConsumerWidget {
           group.name == null
               ? group.groupType.label
               : '${group.groupType.label} - ID: ${group.groupId}',
-          style: const TextStyle(color: AppColors.onSurfaceMuted, fontSize: 12),
+          style: TextStyle(color: AppColors.onSurfaceMuted, fontSize: 12),
         ),
         trailing: Row(
           mainAxisSize: MainAxisSize.min,
@@ -214,7 +218,7 @@ class _GroupTile extends ConsumerWidget {
               },
             ),
             IconButton(
-              icon: const Icon(Icons.delete_outline_rounded,
+              icon: Icon(Icons.delete_outline_rounded,
                   color: AppColors.error, size: 20),
               onPressed: () => _confirmDelete(context, ref),
             ),
@@ -240,16 +244,15 @@ class _GroupTile extends ConsumerWidget {
       context: context,
       builder: (_) => AlertDialog(
         backgroundColor: AppColors.surface,
-        title: const Text('Usun grupe',
-            style: TextStyle(color: AppColors.onSurface)),
+        title: Text('Usuń grupę', style: TextStyle(color: AppColors.onSurface)),
         content: Text(
-          'Czy na pewno chcesz usunac grupe ${group.groupId}?\nWszystkie zajecia tej grupy zostana usuniete.',
-          style: const TextStyle(color: AppColors.onSurfaceMuted),
+          'Czy na pewno chcesz usunąć grupę ${group.groupId}?\nWszystkie zajęcia tej grupy zostaną usunięte.',
+          style: TextStyle(color: AppColors.onSurfaceMuted),
         ),
         actions: [
           TextButton(
             onPressed: () => Navigator.pop(context),
-            child: const Text('Anuluj',
+            child: Text('Anuluj',
                 style: TextStyle(color: AppColors.onSurfaceMuted)),
           ),
           TextButton(
@@ -257,7 +260,7 @@ class _GroupTile extends ConsumerWidget {
               ref.read(groupsProvider.notifier).deleteGroup(group.groupId);
               Navigator.pop(context);
             },
-            child: const Text('Usun', style: TextStyle(color: AppColors.error)),
+            child: Text('Usun', style: TextStyle(color: AppColors.error)),
           ),
         ],
       ),
@@ -268,21 +271,21 @@ class _GroupTile extends ConsumerWidget {
 class _ImportUsosButton extends StatelessWidget {
   final VoidCallback onTap;
 
-  const _ImportUsosButton({required this.onTap});
+  _ImportUsosButton({required this.onTap});
 
   @override
   Widget build(BuildContext context) {
     return InkWell(
       onTap: onTap,
-      borderRadius: BorderRadius.circular(14),
+      borderRadius: BorderRadius.circular(8),
       child: Container(
         padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 14),
         decoration: BoxDecoration(
           color: AppColors.surface,
-          borderRadius: BorderRadius.circular(14),
+          borderRadius: BorderRadius.circular(8),
           border: Border.all(color: AppColors.primary.withValues(alpha: 0.28)),
         ),
-        child: const Row(
+        child: Row(
           children: [
             Icon(Icons.cloud_download_rounded, color: AppColors.primary),
             SizedBox(width: 12),
@@ -300,7 +303,7 @@ class _ImportUsosButton extends StatelessWidget {
                   ),
                   SizedBox(height: 2),
                   Text(
-                    'Skanuj grupy dziekanskie i jezykowe',
+                    'Grupy dziekańskie i językowe',
                     style: TextStyle(
                       color: AppColors.onSurfaceMuted,
                       fontSize: 12,
@@ -324,7 +327,7 @@ class _AddGroupButton extends StatelessWidget {
   final String label;
   final VoidCallback onTap;
 
-  const _AddGroupButton({required this.label, required this.onTap});
+  _AddGroupButton({required this.label, required this.onTap});
 
   @override
   Widget build(BuildContext context) {
@@ -335,7 +338,7 @@ class _AddGroupButton extends StatelessWidget {
         padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 14),
         decoration: BoxDecoration(
           color: AppColors.surfaceVariant,
-          borderRadius: BorderRadius.circular(14),
+          borderRadius: BorderRadius.circular(8),
           border: Border.all(
             color: AppColors.primary.withValues(alpha: 0.3),
             width: 1,
@@ -346,15 +349,16 @@ class _AddGroupButton extends StatelessWidget {
           children: [
             Icon(Icons.add_circle_outline_rounded,
                 color: AppColors.primary.withValues(alpha: 0.8), size: 20),
-            const SizedBox(width: 10),
-            Text(
+            SizedBox(width: 10),
+            Expanded(
+                child: Text(
               label,
               style: TextStyle(
                 color: AppColors.primary.withValues(alpha: 0.9),
                 fontWeight: FontWeight.w500,
                 fontSize: 14,
               ),
-            ),
+            )),
           ],
         ),
       ),
@@ -366,7 +370,7 @@ class _AddGroupDialog extends StatefulWidget {
   final GroupType type;
   final WidgetRef widgetRef;
 
-  const _AddGroupDialog({required this.type, required this.widgetRef});
+  _AddGroupDialog({required this.type, required this.widgetRef});
 
   @override
   State<_AddGroupDialog> createState() => _AddGroupDialogState();
@@ -386,6 +390,7 @@ class _AddGroupDialogState extends State<_AddGroupDialog> {
   }
 
   Future<void> _add() async {
+    if (_isSaving) return;
     if (!(_formKey.currentState?.validate() ?? false)) return;
     setState(() => _isSaving = true);
 
@@ -408,7 +413,7 @@ class _AddGroupDialogState extends State<_AddGroupDialog> {
       if (mounted) {
         ScaffoldMessenger.of(context).showSnackBar(
           SnackBar(
-            content: Text('Blad pobierania planu: $e'),
+            content: Text(AppFailure.from(e).message),
             backgroundColor: AppColors.error,
           ),
         );
@@ -420,10 +425,11 @@ class _AddGroupDialogState extends State<_AddGroupDialog> {
   @override
   Widget build(BuildContext context) {
     return AlertDialog(
+      scrollable: true,
       backgroundColor: AppColors.surface,
       title: Text(
-        'Dodaj grupe ${widget.type.label.toLowerCase()}',
-        style: const TextStyle(color: AppColors.onSurface, fontSize: 17),
+        'Dodaj grupę ${widget.type.label.toLowerCase()}',
+        style: TextStyle(color: AppColors.onSurface, fontSize: 17),
       ),
       content: Form(
         key: _formKey,
@@ -432,7 +438,7 @@ class _AddGroupDialogState extends State<_AddGroupDialog> {
           children: [
             TextFormField(
               controller: _idCtrl,
-              decoration: const InputDecoration(
+              decoration: InputDecoration(
                 labelText: 'ID grupy',
                 hintText: 'np. 239641',
               ),
@@ -445,22 +451,22 @@ class _AddGroupDialogState extends State<_AddGroupDialog> {
                 return null;
               },
             ),
-            const SizedBox(height: 12),
+            SizedBox(height: 12),
             TextFormField(
               controller: _nameCtrl,
-              decoration: const InputDecoration(
+              decoration: InputDecoration(
                 labelText: 'Nazwa (opcjonalnie)',
                 hintText: 'np. Gr. 3',
               ),
             ),
-            const SizedBox(height: 12),
+            SizedBox(height: 12),
             Container(
               padding: const EdgeInsets.all(10),
               decoration: BoxDecoration(
                 color: AppColors.surfaceVariant,
                 borderRadius: BorderRadius.circular(10),
               ),
-              child: const Text(
+              child: Text(
                 'ID znajdziesz w adresie URL planu zajec:\nhttps://planzajec.uek.krakow.pl/index.php?typ=G&id=TUTAJ&okres=2',
                 style: TextStyle(color: AppColors.onSurfaceMuted, fontSize: 11),
               ),
@@ -471,19 +477,20 @@ class _AddGroupDialogState extends State<_AddGroupDialog> {
       actions: [
         TextButton(
           onPressed: () => Navigator.pop(context),
-          child: const Text('Anuluj',
-              style: TextStyle(color: AppColors.onSurfaceMuted)),
+          child:
+              Text('Anuluj', style: TextStyle(color: AppColors.onSurfaceMuted)),
         ),
         ElevatedButton(
           onPressed: _isSaving ? null : _add,
           child: _isSaving
-              ? const SizedBox(
+              ? SizedBox(
                   width: 16,
                   height: 16,
                   child: CircularProgressIndicator(
-                      strokeWidth: 2, color: Colors.white),
+                      strokeWidth: 2,
+                      color: Theme.of(context).colorScheme.onPrimary),
                 )
-              : const Text('Dodaj'),
+              : Text('Dodaj'),
         ),
       ],
     );
@@ -491,7 +498,7 @@ class _AddGroupDialogState extends State<_AddGroupDialog> {
 }
 
 class _InfoCard extends StatelessWidget {
-  const _InfoCard();
+  _InfoCard();
 
   @override
   Widget build(BuildContext context) {
@@ -499,9 +506,9 @@ class _InfoCard extends StatelessWidget {
       padding: const EdgeInsets.all(14),
       decoration: BoxDecoration(
         color: AppColors.surfaceVariant,
-        borderRadius: BorderRadius.circular(14),
+        borderRadius: BorderRadius.circular(8),
       ),
-      child: const Column(
+      child: Column(
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
           Row(
@@ -509,11 +516,12 @@ class _InfoCard extends StatelessWidget {
               Icon(Icons.info_outline_rounded,
                   color: AppColors.primary, size: 16),
               SizedBox(width: 8),
-              Text('Jak znalezc ID grupy?',
-                  style: TextStyle(
-                      color: AppColors.onSurface,
-                      fontWeight: FontWeight.w600,
-                      fontSize: 13)),
+              Expanded(
+                  child: Text('Jak znaleźć ID grupy?',
+                      style: TextStyle(
+                          color: AppColors.onSurface,
+                          fontWeight: FontWeight.w600,
+                          fontSize: 13))),
             ],
           ),
           SizedBox(height: 8),

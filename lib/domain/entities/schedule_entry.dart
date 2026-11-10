@@ -13,6 +13,7 @@ class ScheduleEntry {
   final double durationHours;
   final String groupId;
   final GroupType groupType;
+  final String studentGroups;
 
   // Moved class fields
   final bool isMoved;
@@ -36,6 +37,7 @@ class ScheduleEntry {
     required this.durationHours,
     required this.groupId,
     required this.groupType,
+    this.studentGroups = '',
     this.isMoved = false,
     this.originalDate,
     this.originalStartTime,
@@ -46,28 +48,6 @@ class ScheduleEntry {
   });
 
   bool get isReservation => classType.toLowerCase().contains('rezerwacja');
-
-  DateTime get startDateTime {
-    final parts = startTime.split(':');
-    return DateTime(
-      date.year,
-      date.month,
-      date.day,
-      int.parse(parts[0]),
-      int.parse(parts[1]),
-    );
-  }
-
-  DateTime get endDateTime {
-    final parts = endTime.split(':');
-    return DateTime(
-      date.year,
-      date.month,
-      date.day,
-      int.parse(parts[0]),
-      int.parse(parts[1]),
-    );
-  }
 
   ScheduleEntry copyWith({
     String? id,
@@ -82,6 +62,7 @@ class ScheduleEntry {
     double? durationHours,
     String? groupId,
     GroupType? groupType,
+    String? studentGroups,
     bool? isMoved,
     DateTime? originalDate,
     String? originalStartTime,
@@ -103,6 +84,7 @@ class ScheduleEntry {
       durationHours: durationHours ?? this.durationHours,
       groupId: groupId ?? this.groupId,
       groupType: groupType ?? this.groupType,
+      studentGroups: studentGroups ?? this.studentGroups,
       isMoved: isMoved ?? this.isMoved,
       originalDate: originalDate ?? this.originalDate,
       originalStartTime: originalStartTime ?? this.originalStartTime,

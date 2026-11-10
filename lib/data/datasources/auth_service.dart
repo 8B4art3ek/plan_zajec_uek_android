@@ -26,11 +26,6 @@ class AuthService {
     return Credentials(username: username, password: password);
   }
 
-  Future<bool> hasCredentials() async {
-    final creds = await getCredentials();
-    return creds != null;
-  }
-
   Future<void> clearCredentials() async {
     await _storage.delete(key: _usernameKey);
     await _storage.delete(key: _passwordKey);

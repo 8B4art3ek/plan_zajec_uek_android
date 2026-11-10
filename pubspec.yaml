@@ -1,7 +1,7 @@
 name: plan_zajec_uek
-description: Plan zajęć UEK - aplikacja do wyświetlania planu zajęć.
+description: Niezbędnik Studenta - plan zajęć, obecności i dojazdy na uczelnię.
 publish_to: 'none'
-version: 1.0.0+1
+version: 1.0.9+10
 
 environment:
   sdk: '>=3.3.0 <4.0.0'
@@ -15,6 +15,7 @@ dependencies:
 
   # Network
   http: ^1.2.1
+  cookie_jar: ^4.0.9
 
   # HTML parsing
   html: ^0.15.4
@@ -38,11 +39,17 @@ dependencies:
   # Date formatting
   intl: ^0.19.0
   webview_flutter: ^4.14.1
+  url_launcher: ^6.3.3
+  mobile_scanner: ^7.5.0
 
 dev_dependencies:
   flutter_test:
     sdk: flutter
   flutter_lints: ^3.0.0
+  webview_flutter_platform_interface: ^2.15.1
+  sqflite_common_ffi: ^2.4.0+3
 
 flutter:
   uses-material-design: true
+  assets:
+    - assets/branding/app_icon.png

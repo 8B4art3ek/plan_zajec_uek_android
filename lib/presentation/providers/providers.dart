@@ -3,6 +3,8 @@
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import '../../core/theme/app_theme.dart';
+import '../../core/refresh_settings.dart';
+import '../../data/datasources/background_service.dart';
 import '../../data/datasources/auth_service.dart';
 import '../../data/datasources/local_database.dart';
 import '../../data/datasources/schedule_parser.dart';
@@ -12,6 +14,7 @@ import '../../domain/entities/group.dart';
 import '../../domain/entities/schedule_entry.dart';
 import '../../domain/entities/subject_filter.dart';
 import '../../domain/entities/user_event.dart';
+import '../../domain/entities/university.dart';
 
 // ---- Infrastructure Providers ----
 
@@ -23,8 +26,11 @@ final localDatabaseProvider = Provider<LocalDatabase>((ref) {
 
 final authServiceProvider = Provider<AuthService>((ref) => AuthService());
 
-final remoteDatasourceProvider =
-    Provider<ScheduleRemoteDatasource>((ref) => ScheduleRemoteDatasource());
+final remoteDatasourceProvider = Provider<ScheduleRemoteDatasource>((ref) {
+  final remote = ScheduleRemoteDatasource();
+  ref.onDispose(remote.close);
+  return remote;
+});
 
 final scheduleParserProvider =
     Provider<ScheduleParser>((ref) => ScheduleParser());
@@ -39,6 +45,35 @@ final scheduleRepositoryProvider = Provider<ScheduleRepository>((ref) {
 });
 
 // ---- Auth Providers ----
+
+final pendingGroupSetupProvider = StateProvider<bool>((ref) => false);
+
+final universityProvider =
+    AsyncNotifierProvider<UniversityNotifier, University?>(
+        UniversityNotifier.new);
+
+class UniversityNotifier extends AsyncNotifier<University?> {
+  static const settingKey = 'selected_university';
+  @override
+  Future<University?> build() async {
+    final repo = ref.watch(scheduleRepositoryProvider);
+    final saved = University.fromStorage(await repo.getAppSetting(settingKey));
+    if (saved != null) return saved;
+    // Existing accounts were all created for UEK; retain their configuration.
+    if (await ref.watch(credentialsProvider.future) != null) {
+      await repo.setAppSetting(settingKey, University.uek.id);
+      return University.uek;
+    }
+    return null;
+  }
+
+  Future<void> select(University university) async {
+    await ref
+        .read(scheduleRepositoryProvider)
+        .setAppSetting(settingKey, university.id);
+    state = AsyncData(university);
+  }
+}
 
 final credentialsProvider = FutureProvider<Credentials?>((ref) {
   return ref.watch(authServiceProvider).getCredentials();
@@ -63,16 +98,20 @@ class GroupsNotifier extends AsyncNotifier<List<Group>> {
   Future<void> addGroup(Group group) async {
     await ref.read(scheduleRepositoryProvider).addGroup(group);
     ref.invalidateSelf();
+    ref.invalidate(todayScheduleProvider);
   }
 
   Future<void> updateGroup(Group group) async {
     await ref.read(scheduleRepositoryProvider).updateGroup(group);
     ref.invalidateSelf();
+    ref.invalidate(todayScheduleProvider);
   }
 
   Future<void> deleteGroup(String groupId) async {
     await ref.read(scheduleRepositoryProvider).deleteGroup(groupId);
     ref.invalidateSelf();
+    ref.invalidate(todayScheduleProvider);
+    ref.invalidate(subjectFiltersProvider);
   }
 }
 
@@ -132,22 +171,23 @@ bool _sameDay(DateTime a, DateTime b) =>
 
 final isRefreshingProvider = StateProvider<bool>((ref) => false);
 
-final refreshErrorProvider = StateProvider<String?>((ref) => null);
-
 // ---- Refresh info ----
 
 class RefreshInfo {
   final DateTime? lastRefreshAt;
   final String? status;
   final String? error;
+  final DateTime? nextRetryAt;
 
   const RefreshInfo({
     required this.lastRefreshAt,
     required this.status,
     required this.error,
+    this.nextRetryAt,
   });
 
-  bool get hasData => lastRefreshAt != null || status != null;
+  bool get hasFailure =>
+      status == 'partial_error' || status == 'partial_changed';
 }
 
 final refreshInfoProvider =
@@ -165,10 +205,120 @@ final refreshInfoProvider =
         lastRefreshAtRaw == null ? null : DateTime.tryParse(lastRefreshAtRaw),
     status: status,
     error: errorRaw == null || errorRaw.trim().isEmpty ? null : errorRaw,
+    nextRetryAt: await repo.nextAutomaticRefreshAt(),
   );
 });
 
 // ---- Class type colors ----
+
+const _themeSettingKey = 'app_theme';
+
+final refreshMinutesProvider =
+    AsyncNotifierProvider<RefreshMinutesNotifier, int>(
+        RefreshMinutesNotifier.new);
+
+final refreshSchedulerProvider = Provider<Future<void> Function(int)>((ref) =>
+    (minutes) => BackgroundService.schedulePeriodicRefresh(minutes: minutes));
+
+class RefreshMinutesNotifier extends AsyncNotifier<int> {
+  @override
+  Future<int> build() =>
+      ref.watch(scheduleRepositoryProvider).automaticRefreshMinutes();
+
+  Future<void> setMinutes(int minutes) async {
+    if (!RefreshSettings.options.contains(minutes)) {
+      throw ArgumentError.value(minutes);
+    }
+    final repo = ref.read(scheduleRepositoryProvider);
+    final previous = await repo.automaticRefreshMinutes();
+    state = const AsyncLoading();
+    try {
+      await repo.setAppSetting(RefreshSettings.key, '$minutes');
+      await ref.read(refreshSchedulerProvider)(minutes);
+    } catch (_) {
+      await repo.setAppSetting(RefreshSettings.key, '$previous');
+      state = AsyncData(previous);
+      rethrow;
+    }
+    state = AsyncData(minutes);
+  }
+}
+
+final customThemeColorsProvider =
+    AsyncNotifierProvider<CustomThemeColorsNotifier, Map<String, Color>>(
+        CustomThemeColorsNotifier.new);
+
+class CustomThemeColorsNotifier extends AsyncNotifier<Map<String, Color>> {
+  static const keys = ['primary', 'secondary', 'background', 'surface'];
+  @override
+  Future<Map<String, Color>> build() async {
+    final repo = ref.watch(scheduleRepositoryProvider);
+    final colors = <String, Color>{};
+    for (final key in keys) {
+      final raw =
+          int.tryParse(await repo.getAppSetting('theme_color_$key') ?? '');
+      if (raw != null && raw >= 0 && raw <= 0xFFFFFFFF) {
+        colors[key] = Color(raw).withAlpha(255);
+      }
+    }
+    return colors;
+  }
+
+  Future<void> setColor(String key, Color color) async {
+    if (!keys.contains(key)) throw ArgumentError.value(key);
+    await ref.read(scheduleRepositoryProvider).setAppSetting(
+        'theme_color_$key', '${color.withAlpha(255).toARGB32()}');
+    state = AsyncData({...?state.valueOrNull, key: color.withAlpha(255)});
+  }
+
+  Future<void> reset() async {
+    final repo = ref.read(scheduleRepositoryProvider);
+    for (final key in keys) {
+      await repo.setAppSetting('theme_color_$key', '');
+    }
+    state = const AsyncData({});
+    if (await ref.read(appThemeProvider.future) == AppThemeKind.custom) {
+      await ref.read(appThemeProvider.notifier).setTheme(AppThemeKind.midnight);
+    }
+  }
+
+  Future<void> saveTheme(Map<String, Color> colors) async {
+    if (keys.any((key) => !colors.containsKey(key))) {
+      throw ArgumentError('Brak kompletu kolorów motywu.');
+    }
+    await ref.read(appThemeProvider.future);
+    final repo = ref.read(scheduleRepositoryProvider);
+    for (final key in keys) {
+      final color = colors[key];
+      if (color == null) throw ArgumentError.value(key);
+      await repo.setAppSetting(
+          'theme_color_$key', '${color.withAlpha(255).toARGB32()}');
+    }
+    state = AsyncData(Map.of(colors));
+    await ref.read(appThemeProvider.notifier).setTheme(AppThemeKind.custom);
+  }
+}
+
+final appThemeProvider = AsyncNotifierProvider<AppThemeNotifier, AppThemeKind>(
+  AppThemeNotifier.new,
+);
+
+class AppThemeNotifier extends AsyncNotifier<AppThemeKind> {
+  @override
+  Future<AppThemeKind> build() async {
+    final raw = await ref
+        .watch(scheduleRepositoryProvider)
+        .getAppSetting(_themeSettingKey);
+    return AppThemeKind.fromStorage(raw);
+  }
+
+  Future<void> setTheme(AppThemeKind theme) async {
+    await ref
+        .read(scheduleRepositoryProvider)
+        .setAppSetting(_themeSettingKey, theme.storageValue);
+    state = AsyncData(theme);
+  }
+}
 
 final classTypeColorsProvider =
     AsyncNotifierProvider<ClassTypeColorsNotifier, Map<String, Color>>(
@@ -196,7 +346,6 @@ class ClassTypeColorsNotifier extends AsyncNotifier<Map<String, Color>> {
     await ref.read(scheduleRepositoryProvider).setAppSetting(
         AppColors.colorSettingKey(key), color.toARGB32().toString());
     ref.invalidateSelf();
-    ref.invalidate(todayScheduleProvider);
   }
 
   Future<void> resetColor(String key) async {
@@ -208,6 +357,13 @@ class ClassTypeColorsNotifier extends AsyncNotifier<Map<String, Color>> {
 }
 
 // ---- Subject Filters ----
+
+final filterSubjectsProvider =
+    FutureProvider.autoDispose.family<List<String>, String>((ref, groupId) {
+  ref.watch(groupsProvider);
+  ref.watch(refreshInfoProvider);
+  return ref.watch(scheduleRepositoryProvider).getSubjectsForGroup(groupId);
+});
 
 final subjectFiltersProvider =
     AsyncNotifierProvider<SubjectFiltersNotifier, List<SubjectFilter>>(
@@ -222,11 +378,13 @@ class SubjectFiltersNotifier extends AsyncNotifier<List<SubjectFilter>> {
   Future<void> addFilter(SubjectFilter filter) async {
     await ref.read(scheduleRepositoryProvider).upsertSubjectFilter(filter);
     ref.invalidateSelf();
+    ref.invalidate(todayScheduleProvider);
   }
 
   Future<void> removeFilter(int id) async {
     await ref.read(scheduleRepositoryProvider).deleteSubjectFilter(id);
     ref.invalidateSelf();
+    ref.invalidate(todayScheduleProvider);
   }
 }
 

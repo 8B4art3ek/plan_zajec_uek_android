@@ -16,8 +16,9 @@ Future<void> showUserEventSheet({
   return showModalBottomSheet<void>(
     context: context,
     isScrollControlled: true,
+    useSafeArea: true,
     backgroundColor: AppColors.surface,
-    shape: const RoundedRectangleBorder(
+    shape: RoundedRectangleBorder(
       borderRadius: BorderRadius.vertical(top: Radius.circular(24)),
     ),
     builder: (_) => UserEventSheet(
@@ -38,7 +39,8 @@ Future<void> showUserEventSheetForEntry({
   final eventId = _eventIdFromEntry(entry);
   if (eventId == null) return;
 
-  final events = ref.read(userEventsProvider).value ?? [];
+  final events = await ref.read(userEventsProvider.future);
+  if (!context.mounted) return;
   UserEvent? event;
   for (final candidate in events) {
     if (candidate.id == eventId) {
@@ -47,15 +49,12 @@ Future<void> showUserEventSheetForEntry({
     }
   }
 
-  event ??= UserEvent(
-    id: eventId,
-    title: entry.subject,
-    eventType: entry.classType,
-    date: entry.date,
-    startTime: entry.startTime,
-    endTime: entry.endTime,
-    room: entry.room.isEmpty ? null : entry.room,
-  );
+  if (event == null) {
+    ScaffoldMessenger.of(context).showSnackBar(
+      const SnackBar(content: Text('To wydarzenie już nie istnieje.')),
+    );
+    return;
+  }
 
   await showUserEventSheet(
     context: context,
@@ -75,7 +74,7 @@ class UserEventSheet extends StatefulWidget {
   final DateTime? initialDate;
   final UserEvent? event;
 
-  const UserEventSheet({
+  UserEventSheet({
     super.key,
     required this.widgetRef,
     this.initialDate,
@@ -107,10 +106,8 @@ class _UserEventSheetState extends State<UserEventSheet> {
     _typeCtrl.text = event?.eventType ?? UserEvent.defaultEventType;
     _roomCtrl.text = event?.room ?? '';
     _selectedDate = event?.date ?? widget.initialDate ?? DateTime.now();
-    _startTime =
-        _parseTime(event?.startTime) ?? const TimeOfDay(hour: 9, minute: 0);
-    _endTime =
-        _parseTime(event?.endTime) ?? const TimeOfDay(hour: 10, minute: 30);
+    _startTime = _parseTime(event?.startTime) ?? TimeOfDay(hour: 9, minute: 0);
+    _endTime = _parseTime(event?.endTime) ?? TimeOfDay(hour: 10, minute: 30);
   }
 
   @override
@@ -137,9 +134,10 @@ class _UserEventSheetState extends State<UserEventSheet> {
   int _minutes(TimeOfDay t) => t.hour * 60 + t.minute;
 
   Future<void> _save() async {
+    if (_isSaving) return;
     if (!(_formKey.currentState?.validate() ?? false)) return;
     if (_minutes(_endTime) <= _minutes(_startTime)) {
-      setState(() => _error = 'Koniec musi byc po poczatku.');
+      setState(() => _error = 'Koniec musi być po początku.');
       return;
     }
 
@@ -196,25 +194,25 @@ class _UserEventSheetState extends State<UserEventSheet> {
       context: context,
       builder: (_) => AlertDialog(
         backgroundColor: AppColors.surface,
-        title: const Text(
+        title: Text(
           'Usun wydarzenie',
           style: TextStyle(color: AppColors.onSurface),
         ),
-        content: const Text(
+        content: Text(
           'Czy na pewno chcesz usunac to wydarzenie?',
           style: TextStyle(color: AppColors.onSurfaceMuted),
         ),
         actions: [
           TextButton(
             onPressed: () => Navigator.of(context).pop(false),
-            child: const Text(
+            child: Text(
               'Anuluj',
               style: TextStyle(color: AppColors.onSurfaceMuted),
             ),
           ),
           TextButton(
             onPressed: () => Navigator.of(context).pop(true),
-            child: const Text(
+            child: Text(
               'Usun',
               style: TextStyle(color: AppColors.error),
             ),
@@ -236,7 +234,9 @@ class _UserEventSheetState extends State<UserEventSheet> {
         left: 20,
         right: 20,
         top: 20,
-        bottom: MediaQuery.of(context).viewInsets.bottom + 20,
+        bottom: MediaQuery.of(context).viewInsets.bottom +
+            MediaQuery.paddingOf(context).bottom +
+            20,
       ),
       child: Form(
         key: _formKey,
@@ -247,17 +247,17 @@ class _UserEventSheetState extends State<UserEventSheet> {
             children: [
               Row(
                 children: [
-                  Text(
+                  Expanded(
+                      child: Text(
                     _isEditing ? 'Edytuj wydarzenie' : 'Dodaj wydarzenie',
-                    style: const TextStyle(
+                    style: TextStyle(
                       color: AppColors.onSurface,
                       fontSize: 18,
                       fontWeight: FontWeight.w700,
                     ),
-                  ),
-                  const Spacer(),
+                  )),
                   IconButton(
-                    icon: const Icon(
+                    icon: Icon(
                       Icons.close,
                       color: AppColors.onSurfaceMuted,
                     ),
@@ -265,48 +265,46 @@ class _UserEventSheetState extends State<UserEventSheet> {
                   ),
                 ],
               ),
-              const SizedBox(height: 16),
+              SizedBox(height: 16),
               TextFormField(
                 controller: _titleCtrl,
-                decoration: const InputDecoration(labelText: 'Tytul'),
+                decoration: InputDecoration(labelText: 'Tytul'),
                 validator: (v) =>
                     v == null || v.trim().isEmpty ? 'Podaj tytul' : null,
               ),
-              const SizedBox(height: 12),
+              SizedBox(height: 12),
               TextFormField(
                 controller: _typeCtrl,
-                decoration: const InputDecoration(
+                decoration: InputDecoration(
                   labelText: 'Typ wydarzenia',
                   hintText: 'np. Egzamin, zerowka, kolos',
                 ),
               ),
-              const SizedBox(height: 12),
+              SizedBox(height: 12),
               TextFormField(
                 controller: _roomCtrl,
-                decoration:
-                    const InputDecoration(labelText: 'Sala (opcjonalnie)'),
+                decoration: InputDecoration(labelText: 'Sala (opcjonalnie)'),
               ),
-              const SizedBox(height: 12),
+              SizedBox(height: 12),
               InkWell(
                 onTap: () async {
                   final d = await showDatePicker(
                     context: context,
                     initialDate: _selectedDate,
-                    firstDate:
-                        DateTime.now().subtract(const Duration(days: 365 * 5)),
-                    lastDate: DateTime.now().add(const Duration(days: 365 * 5)),
+                    firstDate: DateTime.now().subtract(Duration(days: 365 * 5)),
+                    lastDate: DateTime.now().add(Duration(days: 365 * 5)),
                   );
                   if (d != null) setState(() => _selectedDate = d);
                 },
                 child: InputDecorator(
-                  decoration: const InputDecoration(labelText: 'Data'),
+                  decoration: InputDecoration(labelText: 'Data'),
                   child: Text(
                     DateFormat('dd.MM.yyyy').format(_selectedDate),
-                    style: const TextStyle(color: AppColors.onSurface),
+                    style: TextStyle(color: AppColors.onSurface),
                   ),
                 ),
               ),
-              const SizedBox(height: 12),
+              SizedBox(height: 12),
               Row(
                 children: [
                   Expanded(
@@ -319,16 +317,15 @@ class _UserEventSheetState extends State<UserEventSheet> {
                         if (t != null) setState(() => _startTime = t);
                       },
                       child: InputDecorator(
-                        decoration:
-                            const InputDecoration(labelText: 'Poczatek'),
+                        decoration: InputDecoration(labelText: 'Poczatek'),
                         child: Text(
                           _fmt(_startTime),
-                          style: const TextStyle(color: AppColors.onSurface),
+                          style: TextStyle(color: AppColors.onSurface),
                         ),
                       ),
                     ),
                   ),
-                  const SizedBox(width: 12),
+                  SizedBox(width: 12),
                   Expanded(
                     child: InkWell(
                       onTap: () async {
@@ -339,10 +336,10 @@ class _UserEventSheetState extends State<UserEventSheet> {
                         if (t != null) setState(() => _endTime = t);
                       },
                       child: InputDecorator(
-                        decoration: const InputDecoration(labelText: 'Koniec'),
+                        decoration: InputDecoration(labelText: 'Koniec'),
                         child: Text(
                           _fmt(_endTime),
-                          style: const TextStyle(color: AppColors.onSurface),
+                          style: TextStyle(color: AppColors.onSurface),
                         ),
                       ),
                     ),
@@ -350,34 +347,36 @@ class _UserEventSheetState extends State<UserEventSheet> {
                 ],
               ),
               if (_error != null) ...[
-                const SizedBox(height: 12),
+                SizedBox(height: 12),
                 Text(
                   _error!,
-                  style: const TextStyle(color: AppColors.error, fontSize: 13),
+                  style: TextStyle(color: AppColors.error, fontSize: 13),
                 ),
               ],
-              const SizedBox(height: 20),
-              Row(
+              SizedBox(height: 20),
+              OverflowBar(
+                alignment: MainAxisAlignment.end,
+                spacing: 12,
+                overflowSpacing: 8,
                 children: [
                   if (_isEditing)
                     TextButton.icon(
                       onPressed: _isSaving ? null : _delete,
-                      icon: const Icon(Icons.delete_outline_rounded, size: 18),
-                      label: const Text('Usun'),
+                      icon: Icon(Icons.delete_outline_rounded, size: 18),
+                      label: Text('Usun'),
                       style: TextButton.styleFrom(
                         foregroundColor: AppColors.error,
                       ),
                     ),
-                  const Spacer(),
                   ElevatedButton(
                     onPressed: _isSaving ? null : _save,
                     child: _isSaving
-                        ? const SizedBox(
+                        ? SizedBox(
                             height: 20,
                             width: 20,
                             child: CircularProgressIndicator(
                               strokeWidth: 2,
-                              color: Colors.white,
+                              color: Theme.of(context).colorScheme.onPrimary,
                             ),
                           )
                         : Text(_isEditing ? 'Zapisz zmiany' : 'Zapisz'),

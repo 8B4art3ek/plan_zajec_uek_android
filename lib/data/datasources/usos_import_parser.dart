@@ -13,12 +13,19 @@ class UsosImportParser {
         .map(_cleanup)
         .where((row) => row.isNotEmpty)
         .toList();
+    final capturedDeanCodes = (payload['deanCodes'] as List? ?? const [])
+        .whereType<String>()
+        .map((code) => code.trim().toUpperCase())
+        .where((code) => code.isNotEmpty)
+        .toList();
 
     final sources = _buildSources(text, rows);
     return UsosImportData(
       pageUrl: payload['url'] as String?,
       pageTitle: payload['title'] as String?,
-      deanCodes: _extractDeanCodes(sources),
+      deanCodes: capturedDeanCodes.isEmpty
+          ? _extractDeanCodes(sources)
+          : _uniqueBy(capturedDeanCodes, (code) => code),
       languageGroups: _extractLanguageGroups(sources),
     );
   }
@@ -37,16 +44,47 @@ class UsosImportParser {
 
   List<String> _buildSources(String text, List<String> rows) {
     final sources = <String>[...rows];
-    sources.addAll(
-      text
-          .split(RegExp(r'[\r\n]+'))
-          .map(_cleanup)
-          .where((line) => line.isNotEmpty && line.length <= 600),
-    );
+    final lines = text
+        .split(RegExp(r'[\r\n]+'))
+        .map(_cleanup)
+        .where((line) => line.isNotEmpty && line.length <= 600)
+        .toList();
+    sources.addAll(lines);
+
+    // USOS puts the language code and "grupa nr" on separate lines.
+    for (var index = 0; index < lines.length; index++) {
+      if (_courseCodeFromText(lines[index]) == null) continue;
+
+      for (var nextIndex = index + 1; nextIndex < lines.length; nextIndex++) {
+        if (_courseCodeFromText(lines[nextIndex]) != null) break;
+        if (_groupNumberFromText(_fold(lines[nextIndex])) == null) continue;
+
+        final joined = lines.sublist(index, nextIndex + 1).join(' ');
+        if (joined.length <= 600) sources.add(joined);
+        break;
+      }
+    }
     return _uniqueBy(sources, (source) => _fold(source));
   }
 
   List<String> _extractDeanCodes(List<String> sources) {
+    final markedCodes = <String>[];
+    final markedCodePattern = RegExp(
+      r'grupa\s+dziekanska\s*:\s*(?:[a-z0-9-]+\s*)?\[([a-z0-9-]+)\]',
+      caseSensitive: false,
+    );
+
+    for (final source in sources) {
+      if (_courseCodeCount(source) > 1) continue;
+      final folded = _fold(source);
+      for (final match in markedCodePattern.allMatches(folded)) {
+        markedCodes.add(match.group(1)!.toUpperCase());
+      }
+    }
+    if (markedCodes.isNotEmpty) {
+      return _uniqueBy(markedCodes, (code) => code);
+    }
+
     final codes = <String>[];
     final codePattern = RegExp(
       r'\b[A-Z0-9]{2,10}S[12][A-Z0-9]*[-/][A-Z0-9/-]{2,}\b',
@@ -97,12 +135,26 @@ class UsosImportParser {
       );
     }
 
-    return _uniqueBy(
+    final uniqueGroups = _uniqueBy(
       groups,
       (group) => '${group.languageCodeCandidates.join('|')}|${group.level}|'
           '${group.groupNumber}|${group.semester}|${group.studyLevel}|'
           '${group.usosCourseCode}',
     );
+    final courseCodesWithGroupNumber = uniqueGroups
+        .where(
+            (group) => group.groupNumber != 0 && group.usosCourseCode != null)
+        .map((group) => group.usosCourseCode!)
+        .toSet();
+
+    return uniqueGroups
+        .where(
+          (group) =>
+              group.groupNumber != 0 ||
+              group.usosCourseCode == null ||
+              !courseCodesWithGroupNumber.contains(group.usosCourseCode),
+        )
+        .toList(growable: false);
   }
 
   _LanguageDefinition? _languageFromText(String folded) {
@@ -124,11 +176,16 @@ class UsosImportParser {
   }
 
   String? _courseCodeFromText(String source) {
-    return RegExp(
-      r'\b(CJ-[A-Z0-9]+-[0-9]+/[0-9]+-[A-Z]+\.[ABC][12])\b',
-      caseSensitive: false,
-    ).firstMatch(source)?.group(1)?.toUpperCase();
+    return _courseCodePattern.firstMatch(source)?.group(1)?.toUpperCase();
   }
+
+  int _courseCodeCount(String source) =>
+      _courseCodePattern.allMatches(source).length;
+
+  static final _courseCodePattern = RegExp(
+    r'\b(CJ-[A-Z0-9]+-[0-9]+/[0-9]+-[A-Z]+\.[ABC][12])\b',
+    caseSensitive: false,
+  );
 
   String? _levelFromCourseCode(String? courseCode) {
     return RegExp(r'\.([ABC][12])$').firstMatch(courseCode ?? '')?.group(1);

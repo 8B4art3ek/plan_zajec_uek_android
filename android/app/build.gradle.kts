@@ -36,6 +36,17 @@ android {
             // TODO: Add your own signing config for the release build.
             // Signing with the debug keys for now, so `flutter run --release` works.
             signingConfig = signingConfigs.getByName("debug")
+            isMinifyEnabled = false
+            isShrinkResources = false
+        }
+    }
+
+    packaging {
+        jniLibs {
+            // Compress native libraries for direct APK downloads. Keep the
+            // engine intact: stripping it with this Windows NDK broke startup.
+            useLegacyPackaging = true
+            keepDebugSymbols += "**/libflutter.so"
         }
     }
 }

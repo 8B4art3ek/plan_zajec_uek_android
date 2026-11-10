@@ -14,8 +14,6 @@ class UsosImportData {
     required this.languageGroups,
   });
 
-  bool get isEmpty => deanCodes.isEmpty && languageGroups.isEmpty;
-
   String? get fallbackStudyLevel {
     for (final code in deanCodes) {
       final match = RegExp(r'S([12])').firstMatch(code);
@@ -42,7 +40,8 @@ class UsosImportData {
           scheduleCodeCandidates: group.scheduleCodeCandidates(
             fallbackStudyLevel,
           ),
-          includeAllMatches: group.usosCourseCode != null,
+          includeAllMatches:
+              group.usosCourseCode != null && group.groupNumber == 0,
         ),
       );
     }
@@ -79,7 +78,11 @@ class UsosLanguageGroup {
   }
 
   List<String> scheduleCodeCandidates(String? fallbackStudyLevel) {
-    if (usosCourseCode != null) return [usosCourseCode!];
+    if (usosCourseCode != null) {
+      if (groupNumber == 0) return [usosCourseCode!];
+      final groupCode = groupNumber.toString().padLeft(2, '0');
+      return ['$usosCourseCode-$groupCode'];
+    }
     final levels = _unique([studyLevel, fallbackStudyLevel, 'S1', 'S2']);
     final semesters = semester == null ? const [1, 2, 3, 4, 5, 6] : [semester!];
     final groupCode = groupNumber.toString().padLeft(2, '0');
@@ -173,19 +176,6 @@ class UsosImportResult {
   });
 
   int get importedCount => imported.length;
-  bool get hasProblems => unresolved.isNotEmpty || refreshFailures.isNotEmpty;
-
-  UsosImportResult copyWith({
-    List<ResolvedUsosGroup>? imported,
-    List<UnresolvedUsosGroup>? unresolved,
-    List<UsosImportFailure>? refreshFailures,
-  }) {
-    return UsosImportResult(
-      imported: imported ?? this.imported,
-      unresolved: unresolved ?? this.unresolved,
-      refreshFailures: refreshFailures ?? this.refreshFailures,
-    );
-  }
 }
 
 List<T> _unique<T>(Iterable<T?> values) {

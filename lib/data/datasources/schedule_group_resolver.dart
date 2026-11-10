@@ -7,6 +7,14 @@ import '../../domain/entities/schedule_entry.dart';
 import '../../domain/entities/usos_import.dart';
 import 'schedule_remote_datasource.dart';
 
+class PlanCatalogException implements Exception {
+  const PlanCatalogException();
+
+  @override
+  String toString() =>
+      'Nie udało się odczytać katalogu grup na stronie planu UEK. Spróbuj ponownie później.';
+}
+
 class ScheduleGroupResolver {
   static final Uri _baseUri =
       Uri.parse('https://planzajec.uek.krakow.pl/index.php');
@@ -74,6 +82,9 @@ class ScheduleGroupResolver {
       password: password,
     );
     final indexLinks = _extractPlanLinks(indexHtml, _baseUri);
+    if (!indexLinks.any((link) => link.isGroupPage)) {
+      throw const PlanCatalogException();
+    }
     final result = <_PlanLink>[
       ...indexLinks.where((link) => link.scheduleId != null),
     ];
@@ -101,7 +112,8 @@ class ScheduleGroupResolver {
       result.addAll(links.where((link) => link.scheduleId != null));
 
       if (page.depth >= 2) continue;
-      for (final link in links.where((link) => link.isGroupPage)) {
+      for (final link in links
+          .where((link) => link.isGroupPage && link.scheduleId == null)) {
         final childUri = _normalizeUri(link.uri);
         if (!_isPlanPage(childUri) || visited.contains(childUri.toString())) {
           continue;
@@ -120,8 +132,9 @@ class ScheduleGroupResolver {
     List<UsosImportTarget> targets,
   ) {
     final selected = <_PlanLink>[];
-    final categoryLinks =
-        indexLinks.where((link) => link.isGroupPage).toList(growable: false);
+    final categoryLinks = indexLinks
+        .where((link) => link.isGroupPage && link.scheduleId == null)
+        .toList(growable: false);
 
     for (final target in targets) {
       final matches = categoryLinks
@@ -206,6 +219,13 @@ class ScheduleGroupResolver {
 
   List<_PlanLink> _extractPlanLinks(String html, Uri pageUri) {
     final document = html_parser.parse(html);
+    final title = _fold(document.querySelector('title')?.text ?? '');
+    if (document.querySelector('input[type="password"]') != null ||
+        title.contains('internal server error') ||
+        title.contains('wymagane zalogowanie') ||
+        title.contains('cas login')) {
+      throw const PlanCatalogException();
+    }
     return document
         .querySelectorAll('a[href]')
         .map((anchor) => _linkFromAnchor(anchor, pageUri))
@@ -220,7 +240,7 @@ class ScheduleGroupResolver {
     Uri uri;
     try {
       uri = _normalizeUri(pageUri.resolve(href));
-    } on FormatException {
+    } on ArgumentError {
       return null;
     }
     if (!_isPlanPage(uri)) return null;
@@ -285,7 +305,7 @@ class ScheduleGroupResolver {
   String _decodeUriSafely(String value) {
     try {
       return Uri.decodeFull(value);
-    } on FormatException {
+    } on ArgumentError {
       return value;
     }
   }

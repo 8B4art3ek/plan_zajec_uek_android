@@ -3,8 +3,20 @@
 import 'dart:convert';
 import 'dart:typed_data';
 import 'package:http/http.dart' as http;
+import 'plan_cas_session.dart';
 
 class ScheduleRemoteDatasource {
+  final PlanCasSession _session;
+  final Duration requestTimeout;
+
+  ScheduleRemoteDatasource({
+    http.Client? client,
+    this.requestTimeout = const Duration(seconds: 30),
+  }) : _session =
+            PlanCasSession(client ?? http.Client(), timeout: requestTimeout);
+
+  void close() => _session.close();
+
   Future<void> verifyCredentials({
     required String username,
     required String password,
@@ -21,9 +33,11 @@ class ScheduleRemoteDatasource {
     required String password,
     int okres = 3,
   }) async {
-    final uri = Uri.parse(
-      'https://planzajec.uek.krakow.pl/index.php?typ=G&id=$groupId&okres=$okres',
-    );
+    final uri = Uri.https('planzajec.uek.krakow.pl', '/index.php', {
+      'typ': 'G',
+      'id': groupId,
+      'okres': okres.toString(),
+    });
 
     return _getAuthenticatedHtml(uri, username, password);
   }
@@ -52,24 +66,13 @@ class ScheduleRemoteDatasource {
     String username,
     String password,
   ) async {
-    final basicAuth = base64Encode(utf8.encode('$username:$password'));
-
-    final response = await http.get(
-      uri,
-      headers: {
-        'Authorization': 'Basic $basicAuth',
-        'Accept': 'text/html,application/xhtml+xml',
-        'Accept-Language': 'pl,en;q=0.9',
-      },
-    );
-
-    if (response.statusCode == 401) {
-      throw Exception('Nieprawidłowe dane logowania (401).');
+    if (uri.scheme != 'https' ||
+        uri.host != 'planzajec.uek.krakow.pl' ||
+        uri.port != 443 ||
+        uri.userInfo.isNotEmpty) {
+      throw ArgumentError('Niedozwolony adres serwera planu zajęć.');
     }
-    if (response.statusCode != 200) {
-      throw Exception('Błąd HTTP ${response.statusCode}.');
-    }
-
+    final response = await _session.get(uri, username, password);
     return _decodeResponseBody(response);
   }
 
@@ -78,8 +81,9 @@ class ScheduleRemoteDatasource {
     final bytes = response.bodyBytes;
 
     final contentType = response.headers['content-type'] ?? '';
-    final charsetMatch = RegExp(r'charset=([^\s;]+)', caseSensitive: false)
-        .firstMatch(contentType);
+    final charsetMatch =
+        RegExp(r'''charset\s*=\s*["']?([^\s;"']+)''', caseSensitive: false)
+            .firstMatch(contentType);
     final charset = charsetMatch?.group(1)?.toLowerCase().trim();
 
     if (charset == 'utf-8') {

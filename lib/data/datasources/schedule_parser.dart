@@ -12,8 +12,10 @@ class ScheduleParser {
   List<ScheduleEntry> parse(
     String htmlContent,
     String groupId,
-    GroupType groupType,
-  ) {
+    GroupType groupType, {
+    String? lecturerOverride,
+    String? roomOverride,
+  }) {
     final document = html_parser.parse(htmlContent);
     final table = document.querySelector('table.zajecia') ??
         document.querySelector('table');
@@ -44,8 +46,12 @@ class ScheduleParser {
       final dayTime = _extractText(cells[1]).trim();
       final subject = _extractText(cells[2]).trim();
       final classType = _extractText(cells[3]).trim();
-      final lecturer = _extractLecturerText(cells[4]);
-      final room = _extractText(cells[5]).trim();
+      final lecturer = lecturerOverride ?? _extractLecturerText(cells[4]);
+      final room = roomOverride ??
+          _extractText(cells[lecturerOverride == null ? 5 : 4]).trim();
+      final studentGroups = lecturerOverride != null || roomOverride != null
+          ? _extractText(cells[5]).trim()
+          : '';
 
       // Skip empty rows
       if (termDate.isEmpty && subject.isEmpty) {
@@ -86,7 +92,8 @@ class ScheduleParser {
           parsedTime,
         );
         if (movedEntry != null) {
-          entries.addAll(movedEntry.entries);
+          entries.addAll(movedEntry.entries
+              .map((entry) => entry.copyWith(studentGroups: studentGroups)));
           rowIndex += movedEntry.rowsConsumed;
           continue;
         }
@@ -107,6 +114,7 @@ class ScheduleParser {
         durationHours: parsedTime?.durationHours ?? 0,
         groupId: groupId,
         groupType: groupType,
+        studentGroups: studentGroups,
       );
 
       entries.add(entry);
