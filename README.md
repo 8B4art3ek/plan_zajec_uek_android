@@ -63,3 +63,22 @@ zewnętrznych serwisów podlega ich odrębnym warunkom.
 
 Do repozytorium nie należy dodawać danych logowania, sesji, lokalnych baz
 danych, plików środowiskowych ani kluczy podpisujących APK.
+
+## Dojazdy
+
+Wyszukiwarka korzysta z publicznego API Transitous (MOTIS, endpoint plan v6) i wyświetla
+połączenia wewnątrz aplikacji. Wyszukiwanie miejsc korzysta z endpointu
+geocode v1. Nazwy miejsc, wybrane współrzędne, termin i filtry transportu
+są przesyłane do Transitous; dane konta UEK i sesje CAS nie są przekazywane.
+Nie wymaga to klucza API ani własnego serwera. Zasięg i aktualność połączeń
+zależą od danych dostawców. Obsługa sprzedaży biletów nie jest częścią integracji.
+
+Warunki: https://transitous.org/api/ — aplikacja musi pozostać niekomercyjna
+i open source. Zapytania zawierają identyfikator aplikacji i kontakt do repozytorium.
+Źródła danych i atrybucja OpenStreetMap są dostępne na ekranach dojazdów.
+Podpowiedzi w polach początku i celu są pobierane od 3 znaków, po 450 ms
+przerwy w pisaniu. Ostatnie wyszukiwania miejsc są buforowane w pamięci.
+Obliczanie trasy odbywa się wyłącznie na żądanie, bez odpytywania w tle.
+Przed szerszą publikacją należy uzgodnić obciążenie z Transitous, jeżeli
+aplikacja będzie miała wielu użytkowników lub przekroczy 720 zapytań o trasy na dobę.
+Serwis społecznościowy nie gwarantuje dostępności ani kompletności danych.

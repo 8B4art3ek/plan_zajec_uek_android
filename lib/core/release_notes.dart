@@ -1,4 +1,12 @@
 const releaseNotesByBuild = <int, List<String>>{
+  11: [
+    'Wersja testowa: dojazdy wewnątrz aplikacji z wykorzystaniem Transitous.',
+    'Wpisywany początek i cel z podpowiedziami, zamiana kierunku i skróty do UEK.',
+    'Filtry autobusów, tramwajów i kolei, wybór terminu oraz czasu dojścia pieszo.',
+    'Czytelna oś podróży, przesiadki i rozwijana lista przystanków pośrednich.',
+    'Godziny rozkładowe i przewidywane obok siebie, gdy dostępne są dane na żywo.',
+    'Usunięte techniczne numery z nazw przystanków KMŁ/MLD.',
+  ],
   10: [
     'Uporządkowana nawigacja: Plan, Obecności, Dojazdy i Więcej; na dużym ekranie boczny pasek.',
     'Grupy, filtry i plany sal oraz prowadzących w jednej sekcji; krótsze ekrany ustawień.',

@@ -6,6 +6,7 @@ import '../../../core/date_labels.dart';
 import '../../../domain/entities/campus_trip.dart';
 import '../../providers/providers.dart';
 import '../../widgets/app_scroll_view.dart';
+import 'transit_planner_screen.dart';
 
 final tripLauncherProvider = Provider<Future<bool> Function(Uri)>(
     (ref) => (uri) => launchUrl(uri, mode: LaunchMode.externalApplication));
@@ -13,10 +14,7 @@ final tripLauncherProvider = Provider<Future<bool> Function(Uri)>(
 class TravelScreen extends StatelessWidget {
   const TravelScreen({super.key});
   @override
-  Widget build(BuildContext context) => Scaffold(
-        appBar: AppBar(title: const Text('Dojazdy')),
-        body: const Center(child: Text('Wkrótce')),
-      );
+  Widget build(BuildContext context) => const TransitPlannerScreen();
 }
 
 // Retain the planner for later, without exposing it through app navigation.

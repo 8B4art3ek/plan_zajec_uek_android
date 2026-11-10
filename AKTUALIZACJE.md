@@ -26,6 +26,16 @@ Pobieranie nadal wymaga internetu i pobiera cały APK; nie jest aktualizacją OT
    `https://api.github.com/repos/8B4art3ek/uek-plan-releases/releases/latest`.
    Asset musi zawierać rozmiar i `digest` w formacie `sha256:...`.
 
+## Wersje testowe
+
+Prerelease ma oznaczenie np. `1.0.10-beta.1+11`. Liczba po `+` musi rosnąć
+również dla wersji testowych. Na GitHubie ustaw `prerelease: true` i nie oznaczaj
+wydania jako Latest. Publikujemy wyłącznie APK ARM64, z dotychczasowym podpisem.
+Obecny aktualizator pomija prerelease, więc wersję testową pobiera się ręcznie
+ze strony wydania. Nie trzeba odinstalowywać dotychczasowej aplikacji.
+Przed publikacją instalatora wyślij odpowiadające mu źródła z licencją do
+publicznego repozytorium `8B4art3ek/plan_zajec_uek_android`.
+
 ## Podpis aplikacji
 
 Obecne wydania używają dotychczasowego lokalnego klucza debug do zachowania

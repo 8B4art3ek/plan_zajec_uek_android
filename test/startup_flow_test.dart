@@ -237,7 +237,7 @@ void main() {
       ));
 
   testWidgets(
-      'four tabs and disabled travel screen fit a small phone with enlarged text',
+      'four tabs and native travel screen fit a small phone with enlarged text',
       (tester) async {
     tester.view.physicalSize = const Size(320, 640);
     tester.view.devicePixelRatio = 1;
@@ -248,7 +248,7 @@ void main() {
     await tester.pumpAndSettle();
     await tester.tap(find.text('Dojazdy'));
     await tester.pumpAndSettle();
-    expect(find.text('Wkrótce'), findsOneWidget);
+    expect(find.text('Szukaj połączeń'), findsOneWidget);
     expect(find.byType(TextFormField), findsNothing);
     expect(find.text('Szukaj w Jakdojade'), findsNothing);
     expect(find.byType(NavigationDestination), findsNWidgets(4));
@@ -338,18 +338,18 @@ void main() {
     expect(find.byType(NavigationBar), findsNothing);
     await tester.tap(find.byIcon(Icons.route_outlined));
     await tester.pumpAndSettle();
-    expect(find.text('Wkrótce'), findsOneWidget);
+    expect(find.text('Szukaj połączeń'), findsOneWidget);
     await tester.tap(find.byIcon(Icons.grid_view_outlined));
     await tester.pumpAndSettle();
     await preview(tester, 'navigation-tablet');
     await tester.tap(find.byIcon(Icons.route_outlined));
     await tester.pumpAndSettle();
-    expect(find.text('Wkrótce'), findsOneWidget);
+    expect(find.text('Szukaj połączeń'), findsOneWidget);
     tester.view.physicalSize = const Size(360, 800);
     await tester.pumpAndSettle();
     expect(find.byType(NavigationBar), findsOneWidget);
     expect(find.byType(NavigationRail), findsNothing);
-    expect(find.text('Wkrótce'), findsOneWidget);
+    expect(find.text('Szukaj połączeń'), findsOneWidget);
     await tester.binding.handlePopRoute();
     await tester.pumpAndSettle();
     expect(find.text('Dzisiaj'), findsOneWidget);
