@@ -29,12 +29,24 @@ class PlanTarget {
   final PlanKind kind;
   String get key =>
       '${uri.queryParameters['typ']}:${uri.queryParameters['id']}';
+
+  @override
+  bool operator ==(Object other) =>
+      other is PlanTarget &&
+      other.uri == uri &&
+      other.kind == kind &&
+      other.name == name;
+
+  @override
+  int get hashCode => Object.hash(uri, kind, name);
 }
 
 class PlanDirectoryPage {
-  const PlanDirectoryPage(this.targets, this.categories);
+  const PlanDirectoryPage(this.targets, this.categories,
+      {this.loadingMore = false});
   final List<PlanTarget> targets;
   final Map<Uri, String> categories;
+  final bool loadingMore;
 }
 
 class PlanDirectory {
@@ -43,13 +55,29 @@ class PlanDirectory {
   final AuthService auth;
   static final base = Uri.https('planzajec.uek.krakow.pl', '/index.php');
 
-  Future<PlanDirectoryPage> catalogue(PlanKind kind,
-      {Uri? page, bool Function()? cancelled}) async {
-    final first = await load(kind, page: page);
+  Stream<PlanDirectoryPage> catalogue(PlanKind kind,
+      {Uri? page, bool Function()? cancelled}) async* {
+    final credentials = await auth.getCredentials();
+    if (cancelled?.call() == true) return;
+    if (credentials == null) throw StateError('Zaloguj się ponownie.');
+    var first = await _load(kind, page ?? base, credentials);
+    if (cancelled?.call() == true) return;
+    if (page == null && first.targets.isEmpty && first.categories.length == 1) {
+      page = first.categories.keys.single;
+      first = await _load(kind, page, credentials);
+      if (cancelled?.call() == true) return;
+    }
     final targets = {for (final target in first.targets) target.key: target};
     final pending = Map<Uri, String>.of(first.categories);
     final unavailable = <Uri, String>{};
     final visited = <Uri>{page ?? base};
+    PlanDirectoryPage snapshot({required bool loadingMore}) {
+      final sorted = targets.values.toList()
+        ..sort((a, b) => foldSearch(a.name).compareTo(foldSearch(b.name)));
+      return PlanDirectoryPage(sorted, {...unavailable, ...pending},
+          loadingMore: loadingMore);
+    }
+
     while (pending.isNotEmpty &&
         visited.length < 40 &&
         cancelled?.call() != true) {
@@ -58,10 +86,12 @@ class PlanDirectory {
         pending.remove(uri);
         continue;
       }
+      yield snapshot(loadingMore: true);
+      if (cancelled?.call() == true) return;
       // Keep unavailable categories visible so partial results are not lost.
       PlanDirectoryPage next;
       try {
-        next = await load(kind, page: uri);
+        next = await _load(kind, uri, credentials);
       } catch (_) {
         unavailable[uri] = pending.remove(uri)!;
         break;
@@ -74,9 +104,7 @@ class PlanDirectory {
         if (!visited.contains(entry.key)) pending[entry.key] = entry.value;
       }
     }
-    final sorted = targets.values.toList()
-      ..sort((a, b) => foldSearch(a.name).compareTo(foldSearch(b.name)));
-    return PlanDirectoryPage(sorted, {...unavailable, ...pending});
+    if (cancelled?.call() != true) yield snapshot(loadingMore: false);
   }
 
   static PlanDirectoryPage parse(String source, Uri page, PlanKind kind) {
@@ -114,23 +142,14 @@ class PlanDirectory {
     return PlanDirectoryPage(targets.values.toList(), categories);
   }
 
-  Future<PlanDirectoryPage> load(PlanKind kind, {Uri? page}) async {
-    final credentials = await auth.getCredentials();
-    if (credentials == null) throw StateError('Zaloguj się ponownie.');
-    final uri = page ?? base;
+  Future<PlanDirectoryPage> _load(
+      PlanKind kind, Uri uri, Credentials credentials) async {
     final source = await remote.fetchAuthenticatedPlanHtml(
       uri: uri,
       username: credentials.username,
       password: credentials.password,
     );
-    final parsed = parse(source, uri, kind);
-    // Follow the catalogue landing page, not every lecturer/room schedule.
-    if (page == null &&
-        parsed.targets.isEmpty &&
-        parsed.categories.length == 1) {
-      return load(kind, page: parsed.categories.keys.single);
-    }
-    return parsed;
+    return parse(source, uri, kind);
   }
 
   Future<List<ScheduleEntry>> schedule(PlanTarget target, int period) async {

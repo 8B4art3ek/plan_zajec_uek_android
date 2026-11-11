@@ -7,29 +7,45 @@ import '../../data/datasources/plan_directory.dart';
 import '../../domain/entities/schedule_entry.dart';
 import 'providers.dart';
 
-final planDirectoryProvider = Provider((ref) => PlanDirectory(
-      ref.watch(remoteDatasourceProvider),
-      ref.watch(authServiceProvider),
-    ));
+const _planCacheDuration = Duration(minutes: 5);
 
-final planCatalogueProvider = FutureProvider.autoDispose
-    .family<PlanDirectoryPage, (PlanKind, Uri?)>((ref, key) async {
+final planDirectoryProvider = Provider((ref) {
+  ref.watch(credentialsProvider.future);
+  return PlanDirectory(
+    ref.watch(remoteDatasourceProvider),
+    ref.watch(authServiceProvider),
+  );
+});
+
+final planCatalogueProvider = StreamProvider.autoDispose
+    .family<PlanDirectoryPage, (PlanKind, Uri?)>((ref, key) async* {
   var cancelled = false;
   ref.onDispose(() => cancelled = true);
-  final result = await ref
+  await for (final result in ref
       .watch(planDirectoryProvider)
-      .catalogue(key.$1, page: key.$2, cancelled: () => cancelled);
-  if (!cancelled && result.categories.isEmpty) {
-    final link = ref.keepAlive();
-    final timer = Timer(const Duration(minutes: 5), link.close);
-    ref.onDispose(timer.cancel);
+      .catalogue(key.$1, page: key.$2, cancelled: () => cancelled)) {
+    if (cancelled) return;
+    if (!result.loadingMore && result.categories.isEmpty) {
+      final link = ref.keepAlive();
+      final timer = Timer(_planCacheDuration, link.close);
+      ref.onDispose(timer.cancel);
+    }
+    yield result;
   }
-  return result;
 });
 
 final targetScheduleProvider = FutureProvider.autoDispose
-    .family<List<ScheduleEntry>, (PlanTarget, int)>((ref, request) {
-  return ref.watch(planDirectoryProvider).schedule(request.$1, request.$2);
+    .family<List<ScheduleEntry>, (PlanTarget, int)>((ref, request) async {
+  var disposed = false;
+  ref.onDispose(() => disposed = true);
+  final entries =
+      await ref.watch(planDirectoryProvider).schedule(request.$1, request.$2);
+  if (!disposed) {
+    final link = ref.keepAlive();
+    final timer = Timer(_planCacheDuration, link.close);
+    ref.onDispose(timer.cancel);
+  }
+  return entries;
 });
 
 final savedScheduleProvider =

@@ -212,8 +212,9 @@ void main() {
       appThemeProvider.overrideWith(_Theme.new),
       classTypeColorsProvider.overrideWith(_Colors.new),
       todayScheduleProvider.overrideWith((ref) async => repo.previewEntries),
-      planCatalogueProvider
-          .overrideWith((ref, _) async => const PlanDirectoryPage([], {})),
+      planCatalogueProvider.overrideWith((ref, _) async* {
+        yield const PlanDirectoryPage([], {});
+      }),
       savedScheduleProvider.overrideWith((ref) async => []),
       refreshInfoProvider.overrideWith((ref) async =>
           const RefreshInfo(lastRefreshAt: null, status: null, error: null)),

@@ -1,7 +1,7 @@
 name: plan_zajec_uek
 description: Niezbędnik Studenta - plan zajęć, obecności i dojazdy na uczelnię.
 publish_to: 'none'
-version: 1.0.10-beta.1+11
+version: 1.0.10+12
 
 environment:
   sdk: '>=3.3.0 <4.0.0'
@@ -42,6 +42,9 @@ dependencies:
   webview_flutter: ^4.14.1
   url_launcher: ^6.3.3
   mobile_scanner: ^7.5.0
+  flutter_map: ^8.3.2
+  google_polyline_algorithm: ^3.1.0
+  latlong2: ^0.9.1
 
 dev_dependencies:
   flutter_test:

@@ -44,10 +44,36 @@ class _HomeScreenState extends ConsumerState<HomeScreen> {
     final refreshInfo = ref.watch(refreshInfoProvider);
     final lastRefreshText = _formatLastRefresh(refreshInfo);
     final classTypeColors = ref.watch(classTypeColorsProvider).value ?? {};
+    const subtitleFontSize = 11.0;
+    const subtitleLineHeight = 1.25;
+    final subtitleHeight =
+        MediaQuery.textScalerOf(context).scale(subtitleFontSize) *
+            subtitleLineHeight;
 
     return Scaffold(
       appBar: AppBar(
-        title: Text(_isToday(selectedDate) ? 'Dzisiaj' : 'Plan dnia'),
+        toolbarHeight: kMinInteractiveDimension + subtitleHeight,
+        title: Column(
+          mainAxisSize: MainAxisSize.min,
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            Text(_isToday(selectedDate) ? 'Dzisiaj' : 'Plan dnia',
+                maxLines: 1, overflow: TextOverflow.ellipsis),
+            SizedBox(
+              height: subtitleHeight,
+              child: Text(lastRefreshText,
+                  maxLines: 1,
+                  overflow: TextOverflow.ellipsis,
+                  style: TextStyle(
+                    color: AppColors.onSurfaceMuted,
+                    fontSize: subtitleFontSize,
+                    fontWeight: FontWeight.normal,
+                    height: subtitleLineHeight,
+                  )),
+            ),
+          ],
+        ),
+        actionsPadding: EdgeInsets.only(bottom: subtitleHeight),
         actions: [
           IconButton(
             icon: const Icon(Icons.search_rounded),
@@ -98,12 +124,6 @@ class _HomeScreenState extends ConsumerState<HomeScreen> {
                   physics: const AlwaysScrollableScrollPhysics(),
                   padding: const EdgeInsets.only(top: 8, bottom: 32),
                   children: [
-                    Padding(
-                        padding: const EdgeInsets.fromLTRB(16, 0, 16, 8),
-                        child: Text(lastRefreshText,
-                            style: TextStyle(
-                                color: AppColors.onSurfaceMuted,
-                                fontSize: 11))),
                     _DateNavigator(
                       date: selectedDate,
                       onPrevious: () => _setSelectedDate(

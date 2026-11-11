@@ -10,6 +10,7 @@ import '../../providers/providers.dart';
 import '../../providers/transit_provider.dart';
 import '../../widgets/app_scroll_view.dart';
 import '../../widgets/transit_place_field.dart';
+import 'journey_map_screen.dart';
 
 String _clock(DateTime time) => DateFormat('HH:mm').format(time);
 String _day(DateTime time) =>
@@ -20,6 +21,26 @@ IconData _modeIcon(TransitLeg leg) => switch (leg.mode) {
       'BUS' || 'COACH' => Icons.directions_bus_outlined,
       _ => Icons.train_outlined,
     };
+
+Color _modeColor(ColorScheme colors, TransitLeg leg) => leg.cancelled
+    ? colors.error
+    : switch (leg.mode) {
+        'WALK' => colors.onSurfaceVariant,
+        'TRAM' => colors.tertiary,
+        'BUS' || 'COACH' => colors.primary,
+        _ => colors.secondary,
+      };
+
+String _transferCount(TransitJourney journey) => journey.transfers == 0
+    ? 'Bez przesiadek'
+    : 'Przesiadki: ${journey.transfers}';
+
+Duration _walkingTime(TransitJourney journey) => journey.legs
+    .where((leg) => leg.walking)
+    .fold(Duration.zero, (total, leg) => total + leg.duration);
+
+bool _changedClock(DateTime? time, DateTime? scheduled) =>
+    time != null && scheduled != null && _clock(time) != _clock(scheduled);
 
 class TransitPlannerScreen extends ConsumerStatefulWidget {
   const TransitPlannerScreen({super.key});
@@ -381,10 +402,11 @@ class _TransitPlannerState extends ConsumerState<TransitPlannerScreen> {
                                                 .error))),
                               if (_results != null) ...[
                                 const SizedBox(height: 20),
-                                Text('Połączenia · ${_day(_query!.time)}',
-                                    style: Theme.of(context)
-                                        .textTheme
-                                        .titleMedium),
+                                Text('Połączenia',
+                                    style:
+                                        Theme.of(context).textTheme.titleLarge),
+                                const SizedBox(height: 4),
+                                Text(_day(_query!.time)),
                                 const SizedBox(height: 12),
                                 if (_results!.journeys.isEmpty)
                                   const Padding(
@@ -398,6 +420,7 @@ class _TransitPlannerState extends ConsumerState<TransitPlannerScreen> {
                                           const EdgeInsets.only(bottom: 10),
                                       child: _JourneyTile(
                                           journey: journey,
+                                          searchDate: _query!.time,
                                           origin: _query!.origin.name,
                                           destination:
                                               _query!.destination.name)),
@@ -432,67 +455,123 @@ class _TransitPlannerState extends ConsumerState<TransitPlannerScreen> {
 
 class _JourneyTile extends StatelessWidget {
   const _JourneyTile(
-      {required this.journey, required this.origin, required this.destination});
+      {required this.journey,
+      required this.searchDate,
+      required this.origin,
+      required this.destination});
   final TransitJourney journey;
+  final DateTime searchDate;
   final String origin, destination;
   @override
-  Widget build(BuildContext context) => Card(
-        margin: EdgeInsets.zero,
-        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(8)),
-        child: InkWell(
-          borderRadius: BorderRadius.circular(8),
-          onTap: () => Navigator.of(context).push(MaterialPageRoute(
-              builder: (_) => _JourneyDetails(
-                  journey: journey, origin: origin, destination: destination))),
-          child: Padding(
-              padding: const EdgeInsets.all(14),
-              child: Column(
-                  crossAxisAlignment: CrossAxisAlignment.start,
+  Widget build(BuildContext context) {
+    final theme = Theme.of(context);
+    final colors = theme.colorScheme;
+    final vehicles = journey.legs.where((leg) => !leg.walking).toList();
+    final walking = _walkingTime(journey);
+    return Card(
+      margin: EdgeInsets.zero,
+      shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(8)),
+      child: InkWell(
+        borderRadius: BorderRadius.circular(8),
+        onTap: () => Navigator.of(context).push(MaterialPageRoute(
+            builder: (_) => _JourneyDetails(
+                journey: journey, origin: origin, destination: destination))),
+        child: Padding(
+            padding: const EdgeInsets.all(14),
+            child:
+                Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
+              Row(children: [
+                Expanded(
+                    child: Wrap(
+                  spacing: 12,
+                  runSpacing: 4,
+                  crossAxisAlignment: WrapCrossAlignment.center,
                   children: [
-                    Wrap(
-                        spacing: 16,
-                        runSpacing: 4,
-                        crossAxisAlignment: WrapCrossAlignment.center,
-                        children: [
-                          Text(
-                              '${_clock(journey.start)} – ${_clock(journey.end)}',
-                              style: Theme.of(context).textTheme.titleMedium),
-                          Text(travelDuration(journey.duration)),
-                        ]),
-                    Text(_day(journey.start)),
-                    if (!DateUtils.isSameDay(journey.start, journey.end))
-                      Text('Przyjazd ${_day(journey.end)}'),
-                    const SizedBox(height: 8),
-                    Wrap(spacing: 12, runSpacing: 8, children: [
-                      for (final leg in journey.legs)
-                        Row(mainAxisSize: MainAxisSize.min, children: [
-                          Icon(_modeIcon(leg), size: 18),
-                          const SizedBox(width: 4),
-                          Flexible(
-                              child: Text(leg.walking
-                                  ? travelDuration(leg.duration)
-                                  : leg.line.isEmpty
-                                      ? leg.label
-                                      : leg.line))
-                        ])
-                    ]),
-                    const SizedBox(height: 8),
-                    Text(journey.transfers == 0
-                        ? 'Bez przesiadek'
-                        : 'Przesiadki: ${journey.transfers}'),
-                    if (journey.cancelled)
-                      Text('Połączenie odwołane',
-                          style: TextStyle(
-                              color: Theme.of(context).colorScheme.error)),
-                    if (journey.legs.any((leg) => leg.extended))
-                      const Text(
-                          'Rozkład orientacyjny – termin poza opublikowanym rozkładem'),
-                    const Align(
-                        alignment: Alignment.centerRight,
-                        child: Icon(Icons.chevron_right, size: 20)),
-                  ])),
-        ),
-      );
+                    Text('${_clock(journey.start)} – ${_clock(journey.end)}',
+                        style: theme.textTheme.headlineSmall?.copyWith(
+                            color: colors.onSurface,
+                            fontWeight: FontWeight.w700)),
+                    Text(travelDuration(journey.duration),
+                        style: theme.textTheme.bodyLarge),
+                  ],
+                )),
+                const SizedBox(width: 8),
+                Icon(Icons.chevron_right,
+                    size: 22, color: colors.onSurfaceVariant),
+              ]),
+              if (!DateUtils.isSameDay(searchDate, journey.start))
+                Text(_day(journey.start)),
+              if (!DateUtils.isSameDay(journey.start, journey.end))
+                Text('Przyjazd ${_day(journey.end)}'),
+              if (vehicles.isNotEmpty) ...[
+                const SizedBox(height: 12),
+                Wrap(spacing: 6, runSpacing: 6, children: [
+                  for (final leg in vehicles) _LegBadge(leg: leg),
+                ]),
+              ],
+              const SizedBox(height: 10),
+              Wrap(spacing: 14, runSpacing: 6, children: [
+                if (vehicles.isNotEmpty)
+                  _JourneyFact(
+                      icon: Icons.swap_horiz, text: _transferCount(journey)),
+                if (walking > Duration.zero)
+                  _JourneyFact(
+                      icon: Icons.directions_walk,
+                      text: 'Pieszo ${travelDuration(walking)}'),
+              ]),
+              if (journey.cancelled)
+                Text('Połączenie odwołane',
+                    style:
+                        TextStyle(color: Theme.of(context).colorScheme.error)),
+              if (journey.legs.any((leg) => leg.extended))
+                const Text(
+                    'Rozkład orientacyjny – termin poza opublikowanym rozkładem'),
+            ])),
+      ),
+    );
+  }
+}
+
+class _JourneyFact extends StatelessWidget {
+  const _JourneyFact({required this.icon, required this.text});
+  final IconData icon;
+  final String text;
+
+  @override
+  Widget build(BuildContext context) =>
+      Row(mainAxisSize: MainAxisSize.min, children: [
+        Icon(icon,
+            size: 18, color: Theme.of(context).colorScheme.onSurfaceVariant),
+        const SizedBox(width: 5),
+        Flexible(
+            child: Text(text, style: Theme.of(context).textTheme.bodyLarge)),
+      ]);
+}
+
+class _LegBadge extends StatelessWidget {
+  const _LegBadge({required this.leg});
+  final TransitLeg leg;
+
+  @override
+  Widget build(BuildContext context) {
+    final theme = Theme.of(context);
+    final color = _modeColor(theme.colorScheme, leg);
+    return DecoratedBox(
+      decoration: BoxDecoration(
+          color: color.withValues(alpha: .17),
+          borderRadius: BorderRadius.circular(6)),
+      child: Padding(
+          padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 5),
+          child: Row(mainAxisSize: MainAxisSize.min, children: [
+            Icon(_modeIcon(leg), size: 17, color: color),
+            const SizedBox(width: 6),
+            Flexible(
+                child: Text(leg.line.isEmpty ? leg.label : leg.line,
+                    style: theme.textTheme.bodyLarge
+                        ?.copyWith(fontWeight: FontWeight.w700))),
+          ])),
+    );
+  }
 }
 
 class _JourneyDetails extends StatelessWidget {
@@ -536,15 +615,29 @@ class _JourneyDetails extends StatelessWidget {
                     ]),
                 const SizedBox(height: 8),
                 Wrap(spacing: 16, runSpacing: 6, children: [
-                  Text(journey.transfers == 0
-                      ? 'Bez przesiadek'
-                      : 'Przesiadki: ${journey.transfers}'),
-                  if (journey.legs.any((leg) => leg.walking))
-                    Text(
-                        'Pieszo ${travelDuration(journey.legs.where((leg) => leg.walking).fold(Duration.zero, (total, leg) => total + leg.duration))}'),
+                  _JourneyFact(
+                      icon: Icons.swap_horiz, text: _transferCount(journey)),
+                  if (_walkingTime(journey) > Duration.zero)
+                    _JourneyFact(
+                        icon: Icons.directions_walk,
+                        text:
+                            'Pieszo ${travelDuration(_walkingTime(journey))}'),
                 ]),
                 if (!DateUtils.isSameDay(journey.start, journey.end))
                   Text('Przyjazd ${_day(journey.end)}'),
+                const SizedBox(height: 12),
+                Align(
+                    alignment: Alignment.centerLeft,
+                    child: OutlinedButton.icon(
+                      icon: const Icon(Icons.map_outlined),
+                      label: const Text('Mapa całego przejazdu'),
+                      onPressed: () => Navigator.of(context).push(
+                          MaterialPageRoute<void>(
+                              builder: (_) => JourneyMapScreen(
+                                  journey: journey,
+                                  origin: origin,
+                                  destination: destination))),
+                    )),
                 const Padding(
                     padding: EdgeInsets.symmetric(vertical: 16),
                     child: Divider()),
@@ -552,14 +645,24 @@ class _JourneyDetails extends StatelessWidget {
                   if (index > 0 &&
                       journey.legs[index].start
                           .isAfter(journey.legs[index - 1].end))
-                    Padding(
-                        padding: const EdgeInsets.only(left: 36, bottom: 16),
-                        child: Text(
-                            'Oczekiwanie · ${travelDuration(journey.legs[index].start.difference(journey.legs[index - 1].end))}',
-                            style: Theme.of(context).textTheme.bodySmall)),
+                    Container(
+                        margin: const EdgeInsets.only(left: 12),
+                        decoration: BoxDecoration(
+                            border: Border(
+                                left: BorderSide(
+                                    width: 2,
+                                    color: Theme.of(context)
+                                        .colorScheme
+                                        .outlineVariant))),
+                        padding: const EdgeInsets.only(left: 22, bottom: 16),
+                        child: _JourneyFact(
+                            icon: Icons.schedule,
+                            text:
+                                'Oczekiwanie · ${travelDuration(journey.legs[index].start.difference(journey.legs[index - 1].end))}')),
                   _JourneyLegSection(
                       leg: journey.legs[index],
                       name: _name,
+                      first: index == 0,
                       last: index == journey.legs.length - 1),
                 ],
                 const _TransitSources(),
@@ -570,25 +673,28 @@ class _JourneyDetails extends StatelessWidget {
 
 class _JourneyLegSection extends StatelessWidget {
   const _JourneyLegSection(
-      {required this.leg, required this.name, required this.last});
+      {required this.leg,
+      required this.name,
+      required this.first,
+      required this.last});
   final TransitLeg leg;
   final String Function(Map<String, dynamic>) name;
-  final bool last;
+  final bool first, last;
 
   @override
   Widget build(BuildContext context) {
     final theme = Theme.of(context);
     final colors = theme.colorScheme;
-    final color = leg.cancelled
-        ? colors.error
-        : leg.walking
-            ? colors.onSurfaceVariant
-            : leg.mode == 'TRAM'
-                ? colors.tertiary
-                : (leg.mode == 'BUS' || leg.mode == 'COACH')
-                    ? colors.primary
-                    : colors.secondary;
+    final color = _modeColor(colors, leg);
     final delay = leg.start.difference(leg.scheduledStart).inMinutes;
+    final trainService = leg.trainServiceLabel;
+    final hasTimeChanges = leg.realtime &&
+        (_changedClock(leg.start, leg.scheduledStart) ||
+            _changedClock(leg.end, leg.scheduledEnd) ||
+            leg.stops.any((stop) => _changedClock(transitStopTime(stop),
+                transitStopTime(stop, scheduled: true))));
+    final heading = theme.textTheme.titleLarge
+        ?.copyWith(color: colors.onSurface, fontWeight: FontWeight.w700);
     return Stack(children: [
       Container(
           margin: const EdgeInsets.only(left: 12),
@@ -601,21 +707,33 @@ class _JourneyLegSection extends StatelessWidget {
           child:
               Column(crossAxisAlignment: CrossAxisAlignment.stretch, children: [
             if (leg.walking) ...[
-              Wrap(spacing: 12, runSpacing: 4, children: [
-                Text('Pieszo', style: theme.textTheme.titleMedium),
-                Text(
-                    '${travelDuration(leg.duration)}${leg.distance == null ? '' : ' · ${leg.distance} m'}',
-                    style: theme.textTheme.bodyMedium),
-              ]),
+              Wrap(
+                  spacing: 10,
+                  runSpacing: 4,
+                  crossAxisAlignment: WrapCrossAlignment.center,
+                  children: [
+                    Text(
+                        first && last
+                            ? 'Pieszo'
+                            : first
+                                ? 'Dojście pieszo'
+                                : last
+                                    ? 'Dojście do celu'
+                                    : 'Przejście pieszo',
+                        style: heading),
+                    Text(
+                        '${travelDuration(leg.duration)}${leg.distance == null ? '' : ' · ${_distance(leg.distance!)}'}',
+                        style: theme.textTheme.bodyLarge),
+                  ]),
               const SizedBox(height: 4),
               Text(
                   name(leg.from) == name(leg.to)
                       ? name(leg.from)
                       : '${name(leg.from)} → ${name(leg.to)}',
-                  style: theme.textTheme.bodySmall),
+                  style: theme.textTheme.bodyLarge),
               const SizedBox(height: 4),
               Text('${_clock(leg.start)} – ${_clock(leg.end)}',
-                  style: theme.textTheme.bodySmall),
+                  style: theme.textTheme.bodyMedium),
             ] else ...[
               Wrap(
                   spacing: 10,
@@ -629,16 +747,15 @@ class _JourneyLegSection extends StatelessWidget {
                             color: color.withValues(alpha: .14),
                             borderRadius: BorderRadius.circular(6)),
                         child: Text(leg.line.isEmpty ? leg.label : leg.line,
-                            style: theme.textTheme.titleMedium?.copyWith(
-                                color: color, fontWeight: FontWeight.w700))),
-                    Text('${leg.label} · ${travelDuration(leg.duration)}',
-                        style: theme.textTheme.bodySmall),
+                            style: heading)),
+                    Text(leg.headsign.isEmpty ? name(leg.to) : leg.headsign,
+                        style: heading),
                   ]),
-              if (leg.headsign.isNotEmpty)
+              if (trainService != null)
                 Padding(
-                    padding: const EdgeInsets.only(top: 8),
-                    child: Text('Kierunek: ${leg.headsign}',
-                        style: theme.textTheme.bodyMedium)),
+                    padding: const EdgeInsets.only(top: 6),
+                    child:
+                        Text(trainService, style: theme.textTheme.bodyLarge)),
               if (leg.staySeated)
                 const Padding(
                     padding: EdgeInsets.only(top: 6),
@@ -649,9 +766,10 @@ class _JourneyLegSection extends StatelessWidget {
                     child: Text('Kurs odwołany',
                         style: TextStyle(
                             color: colors.error, fontWeight: FontWeight.w700))),
-              const SizedBox(height: 14),
+              const SizedBox(height: 10),
               _JourneyStopRow(
                   time: leg.start,
+                  reserveTimePair: hasTimeChanges,
                   scheduledTime: leg.realtime ? leg.scheduledStart : null,
                   title: name(leg.from),
                   detail: _platform(leg.from),
@@ -660,13 +778,17 @@ class _JourneyLegSection extends StatelessWidget {
                 ExpansionTile(
                   tilePadding: EdgeInsets.zero,
                   childrenPadding: EdgeInsets.zero,
+                  expandedCrossAxisAlignment: CrossAxisAlignment.stretch,
                   shape: const Border(),
                   collapsedShape: const Border(),
+                  minTileHeight: 40,
                   title: Text('Przystanki po drodze (${leg.stops.length})',
-                      style: theme.textTheme.bodySmall),
+                      style: theme.textTheme.bodyMedium
+                          ?.copyWith(color: colors.onSurfaceVariant)),
                   children: [
                     for (final stop in leg.stops)
                       _JourneyStopRow(
+                          reserveTimePair: hasTimeChanges,
                           time: transitStopTime(stop),
                           scheduledTime: leg.realtime
                               ? transitStopTime(stop, scheduled: true)
@@ -675,26 +797,20 @@ class _JourneyLegSection extends StatelessWidget {
                   ],
                 )
               else
-                const SizedBox(height: 12),
+                const SizedBox(height: 4),
               _JourneyStopRow(
                   time: leg.end,
+                  reserveTimePair: hasTimeChanges,
                   scheduledTime: leg.realtime ? leg.scheduledEnd : null,
                   title: name(leg.to),
                   detail: _platform(leg.to),
                   strong: true),
-              const SizedBox(height: 10),
-              Wrap(spacing: 10, runSpacing: 4, children: [
-                Text(
-                    leg.realtime
-                        ? 'Na żywo${delay > 0 ? ' · +$delay min' : ''}'
-                        : 'Według rozkładu',
-                    style: theme.textTheme.bodySmall
-                        ?.copyWith(color: leg.realtime ? color : null)),
-              ]),
-              if (leg.agency.isNotEmpty)
-                Padding(
-                    padding: const EdgeInsets.only(top: 4),
-                    child: Text(leg.agency, style: theme.textTheme.bodySmall)),
+              if (leg.realtime) ...[
+                const SizedBox(height: 8),
+                Text('Na żywo${delay > 0 ? ' · +$delay min' : ''}',
+                    style: theme.textTheme.bodyMedium
+                        ?.copyWith(color: colors.onSurface)),
+              ],
             ],
             if (!DateUtils.isSameDay(leg.start, leg.end))
               Padding(
@@ -718,6 +834,10 @@ class _JourneyLegSection extends StatelessWidget {
     ]);
   }
 
+  String _distance(int meters) => meters < 1000
+      ? '$meters m'
+      : '${NumberFormat('0.#', 'pl').format(meters / 1000)} km';
+
   String? _platform(Map<String, dynamic> stop) {
     final track = stop['track'] ?? stop['scheduledTrack'];
     if (track is! String || track.isEmpty) return null;
@@ -731,21 +851,28 @@ class _JourneyStopRow extends StatelessWidget {
       required this.title,
       this.scheduledTime,
       this.detail,
+      this.reserveTimePair = false,
       this.strong = false});
   final DateTime? time;
   final DateTime? scheduledTime;
   final String title;
   final String? detail;
   final bool strong;
+  final bool reserveTimePair;
   @override
   Widget build(BuildContext context) {
     final theme = Theme.of(context);
-    final changed = time != null &&
-        scheduledTime != null &&
-        !time!.isAtSameMomentAs(scheduledTime!) &&
-        _clock(time!) != _clock(scheduledTime!);
-    final timeWidth =
-        MediaQuery.textScalerOf(context).scale(14) * (changed ? 7.5 : 3.5) + 8;
+    final changed = _changedClock(time, scheduledTime);
+    final timeWidth = MediaQuery.textScalerOf(context).scale(15) *
+            (reserveTimePair ? 7.5 : 3.5) +
+        8;
+    final stopStyle =
+        (strong ? theme.textTheme.bodyLarge : theme.textTheme.bodyMedium)
+            ?.copyWith(
+                color: strong
+                    ? theme.colorScheme.onSurface
+                    : theme.colorScheme.onSurfaceVariant,
+                fontWeight: strong ? FontWeight.w700 : null);
     final times = Wrap(spacing: 8, runSpacing: 2, children: [
       if (changed)
         Text(_clock(scheduledTime!),
@@ -753,21 +880,19 @@ class _JourneyStopRow extends StatelessWidget {
                 decoration: TextDecoration.lineThrough,
                 color: theme.colorScheme.onSurfaceVariant)),
       Text(time == null ? '·' : _clock(time!),
-          style: theme.textTheme.bodyMedium?.copyWith(
-              color: changed ? theme.colorScheme.primary : null,
+          style: stopStyle?.copyWith(
+              color: changed ? theme.colorScheme.onSurface : stopStyle.color,
               fontWeight: strong || changed ? FontWeight.w700 : null)),
     ]);
     final stop =
         Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
-      Text(title,
-          style: theme.textTheme.bodyMedium
-              ?.copyWith(fontWeight: strong ? FontWeight.w600 : null)),
+      Text(title, style: stopStyle),
       if (detail != null) Text(detail!, style: theme.textTheme.bodySmall),
     ]);
     return Padding(
         padding: const EdgeInsets.symmetric(vertical: 5),
         child: LayoutBuilder(builder: (context, constraints) {
-          if (changed && timeWidth > constraints.maxWidth * .5) {
+          if (timeWidth > constraints.maxWidth * .5) {
             return Column(
                 crossAxisAlignment: CrossAxisAlignment.start,
                 children: [times, const SizedBox(height: 4), stop]);

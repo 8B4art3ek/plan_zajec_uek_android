@@ -164,6 +164,14 @@ void main() {
           final key = GlobalKey();
           await tester.pumpWidget(_app(screen, scale, key));
           await tester.pumpAndSettle();
+          if (screen is HomeScreen) {
+            final title = tester.getRect(find.text('Plan dnia'));
+            final subtitle =
+                tester.getRect(find.text('Ostatnia aktualizacja: brak'));
+            final search = tester.getRect(find.byIcon(Icons.search_rounded));
+            expect(title.center.dy, closeTo(search.center.dy, 0.5));
+            expect(subtitle.top, closeTo(title.bottom, 0.5));
+          }
           if (const bool.fromEnvironment('WRITE_PREVIEWS') &&
               screen is SettingsScreen &&
               size.width == 360 &&

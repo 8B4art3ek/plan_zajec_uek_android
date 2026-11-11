@@ -6,6 +6,7 @@ import 'package:http/testing.dart';
 import 'package:plan_zajec_uek/data/datasources/auth_service.dart';
 import 'package:plan_zajec_uek/data/datasources/plan_directory.dart';
 import 'package:plan_zajec_uek/data/datasources/schedule_remote_datasource.dart';
+import 'package:plan_zajec_uek/presentation/providers/providers.dart';
 import 'package:plan_zajec_uek/presentation/providers/search_providers.dart';
 
 class _Auth extends AuthService {
@@ -41,6 +42,48 @@ void main() {
     expect(matchesSearch('prof. Paweł Wołoszyn', '  woloszyn PAWEL '), isTrue);
     expect(matchesSearch('Paw.F CJ 302', '302 paw.f'), isTrue);
     expect(matchesSearch('Matematyka', 'fizyka'), isFalse);
+  });
+
+  test('reopening a plan reuses it until refresh or account invalidation',
+      () async {
+    var requests = 0;
+    final remote = ScheduleRemoteDatasource(client: MockClient((_) async {
+      requests++;
+      return http.Response('<table></table>', 200);
+    }));
+    addTearDown(remote.close);
+    final container = ProviderContainer(overrides: [
+      remoteDatasourceProvider.overrideWithValue(remote),
+      authServiceProvider.overrideWithValue(_Auth()),
+    ]);
+    addTearDown(container.dispose);
+    PlanTarget target() => PlanTarget(
+          name: 'Sala',
+          uri: PlanDirectory.base
+              .replace(queryParameters: {'typ': 'S', 'id': '1'}),
+          kind: PlanKind.room,
+        );
+
+    final first = targetScheduleProvider((target(), 1));
+    final firstListener = container.listen(first, (_, __) {});
+    await container.read(first.future);
+    firstListener.close();
+    await container.pump();
+
+    final reopened = targetScheduleProvider((target(), 1));
+    final listener = container.listen(reopened, (_, __) {});
+    addTearDown(listener.close);
+    await container.read(reopened.future);
+    expect(requests, 1);
+
+    container.invalidate(reopened);
+    await container.read(reopened.future);
+    expect(requests, 2);
+
+    container.invalidate(credentialsProvider);
+    await container.pump();
+    await container.read(reopened.future);
+    expect(requests, 3);
   });
 
   test(
@@ -79,8 +122,12 @@ void main() {
           headers: {'content-type': 'text/html; charset=utf-8'});
     }));
     addTearDown(remote.close);
-    final page =
-        await PlanDirectory(remote, _Auth()).catalogue(PlanKind.lecturer);
+    final pages = await PlanDirectory(remote, _Auth())
+        .catalogue(PlanKind.lecturer)
+        .toList();
+    expect(pages.map((page) => page.loadingMore), [true, true, false]);
+    expect(pages[1].targets.single.name, 'Osoba');
+    final page = pages.last;
     expect(page.targets.single.name, 'Osoba');
     expect(page.categories.values, ['B']);
     expect(requests.length, 3);

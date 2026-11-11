@@ -6,6 +6,7 @@ import 'package:flutter/rendering.dart';
 import 'package:flutter/services.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:flutter_test/flutter_test.dart';
+import 'package:intl/intl.dart';
 import 'package:plan_zajec_uek/core/theme/app_theme.dart';
 import 'package:plan_zajec_uek/data/datasources/transit_service.dart';
 import 'package:plan_zajec_uek/domain/entities/transit_journey.dart';
@@ -158,6 +159,7 @@ void main() {
       await tester.tap(find.text('Bez przesiadek'));
       await tester.pumpAndSettle();
       expect(find.text('Szczegóły połączenia'), findsOneWidget);
+      expect(find.text('Mapa całego przejazdu'), findsOneWidget);
       expect(find.text('Ruczaj → Kampus UEK'), findsOneWidget);
       await preview(tester, 'travel-details-${size.$1}-${size.$2}');
       await tester.scrollUntilVisible(
@@ -183,6 +185,65 @@ void main() {
     await search(tester);
     expect(find.text('Bez przesiadek'), findsOneWidget);
     expect(service.lastQuery!.origin.name, 'Ruczaj');
+  });
+
+  testWidgets(
+      'results separate line badges from total walking and avoid repeating the date',
+      (tester) async {
+    final date = transitNow();
+    String at(int hour, int minute) =>
+        transitTime(date, hour, minute).toUtc().toIso8601String();
+    Map<String, dynamic> leg(String mode, String line, String from, String to,
+            String start, String end,
+            {int? distance}) =>
+        {
+          ...sampleLeg(mode: mode),
+          'displayName': line,
+          'startTime': start,
+          'endTime': end,
+          'from': {'name': from},
+          'to': {'name': to},
+          'distance': distance,
+        };
+    service.customResults = TransitResults([
+      TransitJourney.fromJson({
+        ...sampleJourney(legs: [
+          leg('WALK', '', 'START', 'Wrząsowice Nad Wilgą', at(11, 17),
+              at(11, 47),
+              distance: 2139),
+          leg('BUS', '225', 'Wrząsowice Nad Wilgą', 'Borek Fałęcki', at(11, 47),
+              at(12, 4)),
+          leg('WALK', '', 'Borek Fałęcki', 'Borek Fałęcki', at(12, 4),
+              at(12, 6),
+              distance: 251),
+          leg('TRAM', '78', 'Borek Fałęcki', 'Rondo Mogilskie', at(12, 15),
+              at(12, 49)),
+        ]),
+        'startTime': at(11, 17),
+        'endTime': at(12, 49),
+        'transfers': 1,
+      }),
+    ]);
+    await mount(tester);
+    await origin(tester);
+    await search(tester);
+    final dateLabel = DateFormat('dd.MM.yyyy').format(date);
+    final card = find.ancestor(
+        of: find.text('Przesiadki: 1'), matching: find.byType(Card));
+    expect(find.descendant(of: card, matching: find.textContaining(dateLabel)),
+        findsNothing);
+    expect(find.text('Pieszo 32 min'), findsOneWidget);
+    expect(find.text('225'), findsOneWidget);
+    expect(find.text('78'), findsOneWidget);
+    await tester.ensureVisible(find.text('Przesiadki: 1'));
+    await tester.pumpAndSettle();
+    await preview(tester, 'travel-result-with-transfer');
+    await tester.tap(find.text('Przesiadki: 1'));
+    await tester.pumpAndSettle();
+    expect(find.text('Dojście pieszo'), findsOneWidget);
+    expect(find.text('30 min · 2,1 km'), findsOneWidget);
+    await preview(tester, 'travel-details-with-transfer');
+    expect(tester.takeException(), isNull);
   });
 
   for (final scale in [1.0, 2.0]) {
@@ -235,7 +296,10 @@ void main() {
       await tester.tap(find.text('Bez przesiadek'));
       await tester.pumpAndSettle();
       expect(find.text('Borek Fałęcki'), findsOneWidget);
-      expect(find.text('Kraków MDA'), findsOneWidget);
+      expect(find.text('Kraków MDA'), findsNWidgets(2));
+      expect(find.textContaining('Autobus ·'), findsNothing);
+      expect(find.textContaining('Kierunek:'), findsNothing);
+      expect(find.text('Małopolskie Linie Dowozowe'), findsNothing);
       expect(find.text('Borek Fałęcki 2132'), findsNothing);
       expect(tester.widget<Text>(find.text('08:56')).style!.decoration,
           TextDecoration.lineThrough);
@@ -258,6 +322,34 @@ void main() {
       expect(tester.takeException(), isNull);
     });
   }
+
+  testWidgets('train details separate the line, direction and service name',
+      (tester) async {
+    service.customResults = TransitResults([
+      TransitJourney.fromJson(sampleJourney(legs: [
+        {
+          ...sampleLeg(mode: 'REGIONAL_RAIL'),
+          'routeShortName': 'K5',
+          'tripShortName': '30505 Podhale',
+          'displayName': 'K5 30505 Podhale',
+          'headsign': 'Zakopane',
+          'to': {'name': 'Sucha Beskidzka'},
+        },
+      ])),
+    ]);
+    await mount(tester, width: 320, scale: 2);
+    await origin(tester);
+    await search(tester);
+    await tester.ensureVisible(find.text('Bez przesiadek'));
+    await tester.pumpAndSettle();
+    await tester.tap(find.text('Bez przesiadek'));
+    await tester.pumpAndSettle();
+    expect(find.text('K5'), findsOneWidget);
+    expect(find.text('Zakopane'), findsOneWidget);
+    expect(find.text('K5 Podhale'), findsOneWidget);
+    expect(find.text('Sucha Beskidzka'), findsOneWidget);
+    expect(tester.takeException(), isNull);
+  });
 
   for (final scale in [1.0, 2.0]) {
     testWidgets(

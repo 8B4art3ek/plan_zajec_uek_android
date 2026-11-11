@@ -57,9 +57,10 @@ Widget _app(Widget screen,
       overrides: [
         classTypeColorsProvider.overrideWith(_Colors.new),
         savedScheduleProvider.overrideWith((ref) async => [_entry]),
-        planCatalogueProvider.overrideWith((ref, key) async =>
-            PlanDirectoryPage(
-                [key.$1 == PlanKind.lecturer ? _lecturer : _room], {})),
+        planCatalogueProvider.overrideWith((ref, key) async* {
+          yield PlanDirectoryPage(
+              [key.$1 == PlanKind.lecturer ? _lecturer : _room], {});
+        }),
         targetScheduleProvider.overrideWith((ref, request) async {
           onPeriod?.call(request.$2);
           return targetEntries ?? [_entry];

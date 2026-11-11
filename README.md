@@ -73,6 +73,13 @@ są przesyłane do Transitous; dane konta UEK i sesje CAS nie są przekazywane.
 Nie wymaga to klucza API ani własnego serwera. Zasięg i aktualność połączeń
 zależą od danych dostawców. Obsługa sprzedaży biletów nie jest częścią integracji.
 
+Mapa przejazdu pokazuje przebieg odcinków z Transitous. Tło OpenStreetMap
+jest pobierane po otwarciu mapy i buforowane lokalnie zgodnie z nagłówkami
+serwera, bez pobierania obszarów z wyprzedzeniem. Źródło kafelków można
+zmienić przez `--dart-define=JOURNEY_TILE_URL=...` (z właściwą atrybucją
+dla wybranego dostawcy). Domyślną usługę obowiązuje
+[polityka użycia kafelków OpenStreetMap](https://operations.osmfoundation.org/policies/tiles/).
+
 Warunki: https://transitous.org/api/ — aplikacja musi pozostać niekomercyjna
 i open source. Zapytania zawierają identyfikator aplikacji i kontakt do repozytorium.
 Źródła danych i atrybucja OpenStreetMap są dostępne na ekranach dojazdów.

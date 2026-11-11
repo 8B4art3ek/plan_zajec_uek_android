@@ -35,7 +35,7 @@ class TransitService {
   final _places = <String, List<TransitPlace>>{};
   static const _headers = {
     'Accept': 'application/json',
-    'User-Agent': 'NiezbednikStudenta/1.0.10-beta.1 '
+    'User-Agent': 'NiezbednikStudenta/1.0.10 '
         '(https://github.com/8B4art3ek/plan_zajec_uek_android)',
   };
 
@@ -102,7 +102,8 @@ class TransitService {
           .cast<Map<String, dynamic>>()
           .where((item) => item['country'] == 'PL')
           .map(TransitPlace.fromJson)
-          .where((place) => seen.add('${place.name}:${place.coordinates}'))
+          .where((place) =>
+              seen.add(place.stopId ?? '${place.name}:${place.coordinates}'))
           .toList(growable: false);
       if (_places.length >= 20) _places.remove(_places.keys.first);
       _places[query] = places;
@@ -131,8 +132,8 @@ class TransitService {
     ];
     try {
       final data = await _get('v6/plan', {
-        'fromPlace': query.origin.coordinates,
-        'toPlace': query.destination.coordinates,
+        'fromPlace': query.origin.routingReference,
+        'toPlace': query.destination.routingReference,
         // The live endpoint misreads fractional seconds despite its RFC3339 schema.
         'time':
             DateFormat("yyyy-MM-dd'T'HH:mm:ss'Z'").format(query.time.toUtc()),

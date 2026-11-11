@@ -43,6 +43,30 @@ final sampleQuery = TransitQuery(
     modes: {TripTransport.train});
 
 void main() {
+  test('line codes stay separate from train service names', () {
+    TransitLeg train(String line, String display, String? service) =>
+        TransitLeg.fromJson({
+          ...sampleLeg(mode: 'LONG_DISTANCE'),
+          'routeShortName': line,
+          'displayName': display,
+          'tripShortName': service,
+        });
+    final named = train('IC', 'IC 1312 Malinowski', '1312 Malinowski');
+    expect(named.line, 'IC');
+    expect(named.trainServiceLabel, 'IC Malinowski');
+    expect(train('K5', 'K5 30505 Kasprowy', null).trainServiceLabel,
+        'K5 Kasprowy');
+    expect(train('K5', 'K5', '30505').trainServiceLabel, 'K5 30505');
+    expect(train('IC', 'IC', null).trainServiceLabel, isNull);
+    expect(
+        TransitLeg.fromJson({
+          ...sampleLeg(mode: 'BUS'),
+          'routeShortName': '265',
+          'displayName': '265 Borek',
+        }).line,
+        '265');
+  });
+
   test(
       'MLD technical stop suffixes are hidden without changing IDs or other sources',
       () {
@@ -138,6 +162,7 @@ void main() {
               'lat': 50.06,
               'lon': 19.94,
               'type': 'STOP',
+              'id': 'pl-PKP-Intercity_80416_parent',
               'country': 'PL',
               'areas': [
                 {'name': 'Kraków', 'default': true}
@@ -151,6 +176,7 @@ void main() {
     addTearDown(service.close);
     final places = await service.searchPlaces(' Kraków Główny ');
     expect(places.single.name, 'Kraków Główny');
+    expect(places.single.stopId, 'pl-PKP-Intercity_80416_parent');
     expect(places.single.description, contains('Kraków'));
     await service.searchPlaces('Kraków Główny');
     expect(calls, 1);
@@ -193,6 +219,50 @@ void main() {
     expect(first.previousCursor, isNull);
     final second = await service.plan(sampleQuery, cursor: first.nextCursor);
     expect(second.journeys, hasLength(1));
+  });
+
+  test('routing uses station IDs for stops and coordinates for addresses',
+      () async {
+    final station = TransitPlace.fromJson({
+      'type': 'STOP',
+      'id': 'pl-Polish-Trains_258460',
+      'name': 'Kraków Sanktuarium',
+      'lat': 50.013817,
+      'lon': 19.934296,
+    });
+    final address = TransitPlace.fromJson({
+      'type': 'ADDRESS',
+      'id': 'node/1234',
+      'name': 'Rakowicka 27',
+      'lat': 50.0691863,
+      'lon': 19.9569444,
+    });
+    final railway = campusPlace(CampusDestination.railway);
+    final endpoints = <(String?, String?)>[];
+    final service = TransitService(client: MockClient((request) async {
+      final parameters = request.url.queryParameters;
+      endpoints.add((parameters['fromPlace'], parameters['toPlace']));
+      return http.Response('{"itineraries":[],"direct":[]}', 200);
+    }));
+    addTearDown(service.close);
+    for (final (from, to) in [
+      (station, railway),
+      (station, address),
+      (address, railway)
+    ]) {
+      await service.plan(TransitQuery(
+          origin: from,
+          destination: to,
+          time: sampleQuery.time,
+          arriveBy: false,
+          modes: {TripTransport.train}));
+    }
+    expect(endpoints, [
+      ('pl-Polish-Trains_258460', 'pl-PKP-Intercity_80416_parent'),
+      ('pl-Polish-Trains_258460', address.coordinates),
+      (address.coordinates, 'pl-PKP-Intercity_80416_parent'),
+    ]);
+    expect(campusPlace(CampusDestination.campus).stopId, isNull);
   });
 
   test(

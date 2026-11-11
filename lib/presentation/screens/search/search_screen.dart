@@ -149,24 +149,11 @@ class _Catalogue extends ConsumerWidget {
                 physics: const AlwaysScrollableScrollPhysics(),
                 padding: const EdgeInsets.fromLTRB(16, 0, 16, 32),
                 children: [
-                  if (page.categories.isNotEmpty) ...[
-                    const Text('Pozostałe kategorie'),
-                    for (final category in page.categories.entries)
-                      ListTile(
-                        leading: const Icon(Icons.folder_outlined),
-                        title: Text(category.value),
-                        trailing: const Icon(Icons.chevron_right_rounded),
-                        onTap: () => Navigator.of(context).push(
-                            MaterialPageRoute(
-                                builder: (_) => SearchScreen(
-                                    initialTab:
-                                        kind == PlanKind.lecturer ? 1 : 2,
-                                    initialQuery: query,
-                                    selectLecturerPlan: openPlanDirectly,
-                                    category: category.key))),
-                      ),
-                  ],
-                  if (targets.isEmpty)
+                  if (page.loadingMore)
+                    const LinearProgressIndicator(
+                      semanticsLabel: 'Wczytywanie katalogu',
+                    ),
+                  if (targets.isEmpty && !page.loadingMore)
                     Padding(
                         padding: const EdgeInsets.all(24),
                         child: Text(page.categories.isEmpty
@@ -186,6 +173,23 @@ class _Catalogue extends ConsumerWidget {
                                       name: target.name, target: target)
                                   : TargetScheduleScreen(target: target))),
                     ),
+                  if (!page.loadingMore && page.categories.isNotEmpty) ...[
+                    const Text('Pozostałe kategorie'),
+                    for (final category in page.categories.entries)
+                      ListTile(
+                        leading: const Icon(Icons.folder_outlined),
+                        title: Text(category.value),
+                        trailing: const Icon(Icons.chevron_right_rounded),
+                        onTap: () => Navigator.of(context).push(
+                            MaterialPageRoute(
+                                builder: (_) => SearchScreen(
+                                    initialTab:
+                                        kind == PlanKind.lecturer ? 1 : 2,
+                                    initialQuery: query,
+                                    selectLecturerPlan: openPlanDirectly,
+                                    category: category.key))),
+                      ),
+                  ],
                 ],
               )),
             );
