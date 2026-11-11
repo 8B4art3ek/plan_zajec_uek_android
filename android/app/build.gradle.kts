@@ -33,6 +33,14 @@ android {
 
     buildTypes {
         release {
+            if (providers.gradleProperty("target-platform").orNull == "android-arm64" &&
+                !providers.gradleProperty("split-per-abi").isPresent
+            ) {
+                ndk {
+                    abiFilters.clear()
+                    abiFilters.add("arm64-v8a")
+                }
+            }
             // TODO: Add your own signing config for the release build.
             // Signing with the debug keys for now, so `flutter run --release` works.
             signingConfig = signingConfigs.getByName("debug")
